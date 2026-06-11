@@ -2,18 +2,22 @@ import discord
 import aiohttp
 import os
 import io
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-# Wenn auf Railway gehostet, nutze die Railway URL statt localhost
-API_URL = os.getenv("API_URL", "http://localhost:8000")
-API_KEY = "mein-geheimer-key-123"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+client_groq = Groq(api_key=GROQ_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
+
+# Chat Verläufe speichern
+chat_verlaeufe = {}
 
 @bot.event
 async def on_ready():
@@ -25,29 +29,39 @@ async def on_message(message):
         return
 
     inhalt = message.content
+    user_id = str(message.author.id)
 
+    # ─── !ki Befehl ────────────────────────────────────────
     if inhalt.startswith("!ki "):
         frage = inhalt[4:]
         async with message.channel.typing():
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{API_URL}/chat",
-                        json={
-                            "nachricht": frage,
-                            "session_id": str(message.author.id),
-                            "modell": "gut"
-                        },
-                        headers={"api-key": API_KEY}
-                    ) as response:
-                        data = await response.json()
-                        antwort = data.get("antwort", "Fehler!")
-                        if len(antwort) > 2000:
-                            antwort = antwort[:1997] + "..."
-                        await message.reply(f"🤖 {antwort}")
+                if user_id not in chat_verlaeufe:
+                    chat_verlaeufe[user_id] = []
+                
+                chat_verlaeufe[user_id].append({"role": "user", "content": frage})
+                
+                if len(chat_verlaeufe[user_id]) > 20:
+                    chat_verlaeufe[user_id] = chat_verlaeufe[user_id][-20:]
+
+                antwort = client_groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "Du bist ein hilfreicher Assistent."}
+                    ] + chat_verlaeufe[user_id],
+                    max_tokens=1000
+                )
+                antwort_text = antwort.choices[0].message.content
+                chat_verlaeufe[user_id].append({"role": "assistant", "content": antwort_text})
+
+                if len(antwort_text) > 2000:
+                    antwort_text = antwort_text[:1997] + "..."
+
+                await message.reply(f"🤖 {antwort_text}")
             except Exception as e:
                 await message.reply(f"❌ Fehler: {str(e)}")
 
+    # ─── !bild Befehl ──────────────────────────────────────
     elif inhalt.startswith("!bild "):
         beschreibung = inhalt[6:]
         async with message.channel.typing():
@@ -66,57 +80,46 @@ async def on_message(message):
             except Exception as e:
                 await message.channel.send(f"❌ Fehler: {str(e)}")
 
+    # ─── !übersetzen Befehl ────────────────────────────────
     elif inhalt.startswith("!übersetzen "):
         text = inhalt[12:]
         async with message.channel.typing():
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{API_URL}/chat",
-                        json={
-                            "nachricht": f"Übersetze diesen Text auf Englisch: {text}",
-                            "system": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung.",
-                            "modell": "schnell"
-                        },
-                        headers={"api-key": API_KEY}
-                    ) as response:
-                        data = await response.json()
-                        antwort = data.get("antwort", "Fehler!")
-                        await message.reply(f"🌍 **Übersetzung:** {antwort}")
+                antwort = client_groq.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {"role": "system", "content": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung auf Englisch."},
+                        {"role": "user", "content": text}
+                    ],
+                    max_tokens=500
+                )
+                await message.reply(f"🌍 **Übersetzung:** {antwort.choices[0].message.content}")
             except Exception as e:
                 await message.reply(f"❌ Fehler: {str(e)}")
 
+    # ─── !zusammenfassen Befehl ────────────────────────────
     elif inhalt.startswith("!zusammenfassen "):
         text = inhalt[16:]
         async with message.channel.typing():
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{API_URL}/chat",
-                        json={
-                            "nachricht": f"Fasse diesen Text kurz zusammen: {text}",
-                            "system": "Du fasst Texte kurz und präzise zusammen.",
-                            "modell": "schnell"
-                        },
-                        headers={"api-key": API_KEY}
-                    ) as response:
-                        data = await response.json()
-                        antwort = data.get("antwort", "Fehler!")
-                        await message.reply(f"📝 **Zusammenfassung:** {antwort}")
+                antwort = client_groq.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {"role": "system", "content": "Du fasst Texte kurz und präzise zusammen."},
+                        {"role": "user", "content": text}
+                    ],
+                    max_tokens=500
+                )
+                await message.reply(f"📝 **Zusammenfassung:** {antwort.choices[0].message.content}")
             except Exception as e:
                 await message.reply(f"❌ Fehler: {str(e)}")
 
+    # ─── !reset Befehl ─────────────────────────────────────
     elif inhalt == "!reset":
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(
-                    f"{API_URL}/verlauf/{message.author.id}/loeschen",
-                    headers={"api-key": API_KEY}
-                ) as response:
-                    await message.reply("🗑️ Dein Chat Verlauf wurde gelöscht!")
-        except Exception as e:
-            await message.reply(f"❌ Fehler: {str(e)}")
+        chat_verlaeufe[user_id] = []
+        await message.reply("🗑️ Dein Chat Verlauf wurde gelöscht!")
 
+    # ─── !hilfe Befehl ─────────────────────────────────────
     elif inhalt == "!hilfe":
         embed = discord.Embed(title="🤖 Bot Befehle", color=0x3498DB)
         embed.add_field(name="!ki [frage]", value="KI beantwortet deine Frage", inline=False)

@@ -1,7 +1,4 @@
-fastapi
-uvicorn
+discord.py
 groq
 python-dotenv
-discord.py
 aiohttp
-pydantic
