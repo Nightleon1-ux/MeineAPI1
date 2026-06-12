@@ -16,6 +16,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
 
+# Chat Verläufe speichern
 chat_verlaeufe = {}
 
 @bot.event
@@ -30,6 +31,7 @@ async def on_message(message):
     inhalt = message.content
     user_id = str(message.author.id)
 
+    # ─── !ki Befehl ────────────────────────────────────────
     if inhalt.startswith("!ki "):
         frage = inhalt[4:]
         async with message.channel.typing():
@@ -57,8 +59,10 @@ async def on_message(message):
 
                 await message.reply(f"🤖 {antwort_text}")
             except Exception as e:
-                await message.reply(f"❌ Fehler: {str(e)}")
+                print(f"FEHLER DETAILS: {repr(e)}")
+                await message.reply(f"❌ Fehler: {repr(e)}")
 
+    # ─── !bild Befehl ──────────────────────────────────────
     elif inhalt.startswith("!bild "):
         beschreibung = inhalt[6:]
         async with message.channel.typing():
@@ -77,6 +81,7 @@ async def on_message(message):
             except Exception as e:
                 await message.channel.send(f"❌ Fehler: {str(e)}")
 
+    # ─── !übersetzen Befehl ────────────────────────────────
     elif inhalt.startswith("!übersetzen "):
         text = inhalt[12:]
         async with message.channel.typing():
@@ -93,6 +98,7 @@ async def on_message(message):
             except Exception as e:
                 await message.reply(f"❌ Fehler: {str(e)}")
 
+    # ─── !zusammenfassen Befehl ────────────────────────────
     elif inhalt.startswith("!zusammenfassen "):
         text = inhalt[16:]
         async with message.channel.typing():
@@ -109,10 +115,12 @@ async def on_message(message):
             except Exception as e:
                 await message.reply(f"❌ Fehler: {str(e)}")
 
+    # ─── !reset Befehl ─────────────────────────────────────
     elif inhalt == "!reset":
         chat_verlaeufe[user_id] = []
         await message.reply("🗑️ Dein Chat Verlauf wurde gelöscht!")
 
+    # ─── !hilfe Befehl ─────────────────────────────────────
     elif inhalt == "!hilfe":
         embed = discord.Embed(title="🤖 Bot Befehle", color=0x3498DB)
         embed.add_field(name="!ki [frage]", value="KI beantwortet deine Frage", inline=False)
