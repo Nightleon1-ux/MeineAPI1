@@ -1,23 +1,36 @@
 import discord
 import aiohttp
 import os
-import io
-from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-client_groq = Groq(api_key=GROQ_API_KEY)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
 
-# Chat Verläufe speichern
 chat_verlaeufe = {}
+
+async def groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=1000):
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": modell,
+        "messages": messages,
+        "max_tokens": max_tokens
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(GROQ_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            data = await resp.json()
+            if resp.status != 200:
+                raise Exception(f"Groq Fehler ({resp.status}): {data}")
+            return data["choices"][0]["message"]["content"]
 
 @bot.event
 async def on_ready():
@@ -38,20 +51,15 @@ async def on_message(message):
             try:
                 if user_id not in chat_verlaeufe:
                     chat_verlaeufe[user_id] = []
-                
+
                 chat_verlaeufe[user_id].append({"role": "user", "content": frage})
-                
+
                 if len(chat_verlaeufe[user_id]) > 20:
                     chat_verlaeufe[user_id] = chat_verlaeufe[user_id][-20:]
 
-                antwort = client_groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": "Du bist ein hilfreicher Assistent."}
-                    ] + chat_verlaeufe[user_id],
-                    max_tokens=1000
-                )
-                antwort_text = antwort.choices[0].message.content
+                messages = [{"role": "system", "content": "Du bist ein hilfreicher Assistent."}] + chat_verlaeufe[user_id]
+
+                antwort_text = await groq_anfrage(messages)
                 chat_verlaeufe[user_id].append({"role": "assistant", "content": antwort_text})
 
                 if len(antwort_text) > 2000:
@@ -59,61 +67,35 @@ async def on_message(message):
 
                 await message.reply(f"🤖 {antwort_text}")
             except Exception as e:
-                print(f"FEHLER DETAILS: {repr(e)}")
                 await message.reply(f"❌ Fehler: {repr(e)}")
-
-    # ─── !bild Befehl ──────────────────────────────────────
-    elif inhalt.startswith("!bild "):
-        beschreibung = inhalt[6:]
-        async with message.channel.typing():
-            try:
-                url_beschreibung = beschreibung.replace(" ", "%20")
-                bild_url = f"https://image.pollinations.ai/prompt/{url_beschreibung}?width=1024&height=1024&nologo=true"
-                await message.reply(f"🎨 Generiere Bild: **{beschreibung}**\nWarte kurz...")
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(bild_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                        if resp.status == 200:
-                            bild_daten = await resp.read()
-                            datei = discord.File(io.BytesIO(bild_daten), filename="bild.png")
-                            await message.channel.send(f"✅ Fertig!", file=datei)
-                        else:
-                            await message.channel.send("❌ Bild konnte nicht erstellt werden!")
-            except Exception as e:
-                await message.channel.send(f"❌ Fehler: {str(e)}")
 
     # ─── !übersetzen Befehl ────────────────────────────────
     elif inhalt.startswith("!übersetzen "):
         text = inhalt[12:]
         async with message.channel.typing():
             try:
-                antwort = client_groq.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=[
-                        {"role": "system", "content": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung auf Englisch."},
-                        {"role": "user", "content": text}
-                    ],
-                    max_tokens=500
-                )
-                await message.reply(f"🌍 **Übersetzung:** {antwort.choices[0].message.content}")
+                messages = [
+                    {"role": "system", "content": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung auf Englisch."},
+                    {"role": "user", "content": text}
+                ]
+                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
+                await message.reply(f"🌍 **Übersetzung:** {antwort_text}")
             except Exception as e:
-                await message.reply(f"❌ Fehler: {str(e)}")
+                await message.reply(f"❌ Fehler: {repr(e)}")
 
     # ─── !zusammenfassen Befehl ────────────────────────────
     elif inhalt.startswith("!zusammenfassen "):
         text = inhalt[16:]
         async with message.channel.typing():
             try:
-                antwort = client_groq.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=[
-                        {"role": "system", "content": "Du fasst Texte kurz und präzise zusammen."},
-                        {"role": "user", "content": text}
-                    ],
-                    max_tokens=500
-                )
-                await message.reply(f"📝 **Zusammenfassung:** {antwort.choices[0].message.content}")
+                messages = [
+                    {"role": "system", "content": "Du fasst Texte kurz und präzise zusammen."},
+                    {"role": "user", "content": text}
+                ]
+                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
+                await message.reply(f"📝 **Zusammenfassung:** {antwort_text}")
             except Exception as e:
-                await message.reply(f"❌ Fehler: {str(e)}")
+                await message.reply(f"❌ Fehler: {repr(e)}")
 
     # ─── !reset Befehl ─────────────────────────────────────
     elif inhalt == "!reset":
@@ -124,7 +106,6 @@ async def on_message(message):
     elif inhalt == "!hilfe":
         embed = discord.Embed(title="🤖 Bot Befehle", color=0x3498DB)
         embed.add_field(name="!ki [frage]", value="KI beantwortet deine Frage", inline=False)
-        embed.add_field(name="!bild [beschreibung]", value="Erstellt ein KI Bild 🎨", inline=False)
         embed.add_field(name="!übersetzen [text]", value="Übersetzt Text auf Englisch 🌍", inline=False)
         embed.add_field(name="!zusammenfassen [text]", value="Fasst einen Text zusammen 📝", inline=False)
         embed.add_field(name="!reset", value="Löscht deinen Chat Verlauf 🗑️", inline=False)
