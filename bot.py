@@ -1574,3 +1574,5 @@ async def slash_clear(interaction: discord.Interaction, anzahl: int):
         await interaction.response.send_message(embed=discord.Embed(description=f"🧹 **{len(deleted)}** Nachrichten gelöscht!", color=FARBE_ERFOLG), ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message(embed=fehler_embed("Mir fehlt die Berechtigung **Nachrichten verwalten**!"), ephemeral=True)
+
+
