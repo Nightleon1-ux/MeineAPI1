@@ -14,6 +14,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = discord.Client(intents=intents)
 
 chat_verlaeufe = {}
@@ -22,6 +23,7 @@ merkliste = {}
 levels = {}
 rate_spiel = {}
 todo_listen = {}
+warnungen = {}           # Verwarnungen pro User
 
 # ─── Farben & Design ───────────────────────────────────────
 FARBE_KI = 0x5865F2        # Discord Blau-Violett
@@ -489,6 +491,278 @@ async def on_message(message):
             embed = discord.Embed(title="🏆 Rangliste", description=text, color=0xF1C40F)
             await message.reply(embed=embed)
 
+    # ════════════════════════════════════════════════════════
+    # 🛡️ MODERATIONS-BEFEHLE (keine API nötig, unbegrenzt!)
+    # ════════════════════════════════════════════════════════
+
+    # ─── !clear / !purge Befehl ─────────────────────────────
+    elif inhalt.startswith("!clear ") or inhalt.startswith("!purge "):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Nachrichten verwalten**!"))
+        else:
+            teile = inhalt.split(" ")
+            try:
+                anzahl = int(teile[1])
+                if anzahl < 1 or anzahl > 100:
+                    await message.reply(embed=fehler_embed("Bitte eine Zahl zwischen 1 und 100 angeben!"))
+                else:
+                    deleted = await message.channel.purge(limit=anzahl + 1)  # +1 für den Befehl selbst
+                    embed = discord.Embed(description=f"🧹 **{len(deleted)-1}** Nachrichten gelöscht!", color=FARBE_ERFOLG)
+                    info_msg = await message.channel.send(embed=embed)
+                    await asyncio.sleep(3)
+                    await info_msg.delete()
+            except ValueError:
+                await message.reply(embed=fehler_embed("Nutze: `!clear [anzahl 1-100]`"))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Nachrichten verwalten**!"))
+
+    # ─── !kick Befehl ────────────────────────────────────────
+    elif inhalt.startswith("!kick"):
+        if not message.author.guild_permissions.kick_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken**!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!kick @user [grund]`"))
+        else:
+            ziel = message.mentions[0]
+            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
+            if ziel.guild_permissions.administrator:
+                await message.reply(embed=fehler_embed("Du kannst keinen Administrator kicken!"))
+            else:
+                try:
+                    await ziel.kick(reason=f"{grund} (von {user_name})")
+                    embed = discord.Embed(title="👋 Mitglied gekickt", color=FARBE_ERFOLG)
+                    embed.add_field(name="User", value=ziel.mention, inline=True)
+                    embed.add_field(name="Von", value=message.author.mention, inline=True)
+                    embed.add_field(name="Grund", value=grund, inline=False)
+                    await message.reply(embed=embed)
+                except discord.Forbidden:
+                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu kicken! (Rolle zu hoch?)"))
+
+    # ─── !ban Befehl ─────────────────────────────────────────
+    elif inhalt.startswith("!ban"):
+        if not message.author.guild_permissions.ban_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder bannen**!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!ban @user [grund]`"))
+        else:
+            ziel = message.mentions[0]
+            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
+            if ziel.guild_permissions.administrator:
+                await message.reply(embed=fehler_embed("Du kannst keinen Administrator bannen!"))
+            else:
+                try:
+                    await ziel.ban(reason=f"{grund} (von {user_name})")
+                    embed = discord.Embed(title="🔨 Mitglied gebannt", color=FARBE_FEHLER)
+                    embed.add_field(name="User", value=f"{ziel.mention} ({ziel})", inline=True)
+                    embed.add_field(name="Von", value=message.author.mention, inline=True)
+                    embed.add_field(name="Grund", value=grund, inline=False)
+                    await message.reply(embed=embed)
+                except discord.Forbidden:
+                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu bannen! (Rolle zu hoch?)"))
+
+    # ─── !unban Befehl ───────────────────────────────────────
+    elif inhalt.startswith("!unban "):
+        if not message.author.guild_permissions.ban_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder bannen**!"))
+        else:
+            name_eingabe = inhalt[7:].strip()
+            try:
+                banne = [entry async for entry in message.guild.bans()]
+                gefunden = None
+                for ban_entry in banne:
+                    if name_eingabe.lower() in str(ban_entry.user).lower() or name_eingabe == str(ban_entry.user.id):
+                        gefunden = ban_entry.user
+                        break
+                if gefunden:
+                    await message.guild.unban(gefunden)
+                    await message.reply(embed=discord.Embed(description=f"✅ **{gefunden}** wurde entbannt!", color=FARBE_ERFOLG))
+                else:
+                    await message.reply(embed=fehler_embed(f"Kein gebannter User mit '{name_eingabe}' gefunden!"))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Mitglieder bannen**!"))
+
+    # ─── !mute Befehl (Timeout) ──────────────────────────────
+    elif inhalt.startswith("!mute"):
+        if not message.author.guild_permissions.moderate_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout** (moderate_members)!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!mute @user [zeit] [grund]` (z.B. `!mute @Leon 10m Spam`)"))
+        else:
+            ziel = message.mentions[0]
+            teile = inhalt.split(" ", 3)
+            zeit_str = teile[2] if len(teile) > 2 else "10m"
+            grund = teile[3] if len(teile) > 3 else "Kein Grund angegeben"
+            sekunden = parse_zeit(zeit_str)
+            if sekunden is None:
+                await message.reply(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `1h`, `30s`"))
+            elif sekunden > 2419200:  # max 28 Tage
+                await message.reply(embed=fehler_embed("Maximal 28 Tage Timeout möglich!"))
+            elif ziel.guild_permissions.administrator:
+                await message.reply(embed=fehler_embed("Du kannst keinen Administrator muten!"))
+            else:
+                try:
+                    from datetime import timedelta
+                    await ziel.timeout(timedelta(seconds=sekunden), reason=f"{grund} (von {user_name})")
+                    embed = discord.Embed(title="🔇 Mitglied gemutet", color=FARBE_SPIEL)
+                    embed.add_field(name="User", value=ziel.mention, inline=True)
+                    embed.add_field(name="Dauer", value=zeit_str, inline=True)
+                    embed.add_field(name="Grund", value=grund, inline=False)
+                    await message.reply(embed=embed)
+                except discord.Forbidden:
+                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu muten! (Rolle zu hoch?)"))
+
+    # ─── !unmute Befehl ──────────────────────────────────────
+    elif inhalt.startswith("!unmute"):
+        if not message.author.guild_permissions.moderate_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout**!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!unmute @user`"))
+        else:
+            ziel = message.mentions[0]
+            try:
+                await ziel.timeout(None)
+                await message.reply(embed=discord.Embed(description=f"🔊 {ziel.mention} wurde entmutet!", color=FARBE_ERFOLG))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Ich habe keine Berechtigung!"))
+
+    # ─── !warn Befehl ─────────────────────────────────────────
+    elif inhalt.startswith("!warn"):
+        if not message.author.guild_permissions.kick_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken** um zu verwarnen!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!warn @user [grund]`"))
+        else:
+            ziel = message.mentions[0]
+            ziel_id = str(ziel.id)
+            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
+            if ziel_id not in warnungen:
+                warnungen[ziel_id] = []
+            warnungen[ziel_id].append({"grund": grund, "von": user_name})
+            anzahl = len(warnungen[ziel_id])
+            embed = discord.Embed(title="⚠️ Verwarnung erteilt", color=FARBE_SPIEL)
+            embed.add_field(name="User", value=ziel.mention, inline=True)
+            embed.add_field(name="Anzahl Verwarnungen", value=f"**{anzahl}**", inline=True)
+            embed.add_field(name="Grund", value=grund, inline=False)
+            if anzahl >= 3:
+                embed.add_field(name="⚠️ Achtung", value="Dieser User hat **3 oder mehr** Verwarnungen!", inline=False)
+            await message.reply(embed=embed)
+
+    # ─── !warnungen Befehl ────────────────────────────────────
+    elif inhalt.startswith("!warnungen"):
+        ziel = message.mentions[0] if message.mentions else message.author
+        ziel_id = str(ziel.id)
+        if ziel_id not in warnungen or not warnungen[ziel_id]:
+            await message.reply(embed=discord.Embed(description=f"✅ {ziel.mention} hat keine Verwarnungen!", color=FARBE_ERFOLG))
+        else:
+            text = "\n".join(f"**{i+1}.** {w['grund']} *(von {w['von']})*" for i, w in enumerate(warnungen[ziel_id]))
+            embed = discord.Embed(title=f"⚠️ Verwarnungen von {ziel.display_name}", description=text, color=FARBE_SPIEL)
+            embed.set_thumbnail(url=ziel.display_avatar.url)
+            await message.reply(embed=embed)
+
+    # ─── !entwarnen Befehl ─────────────────────────────────────
+    elif inhalt.startswith("!entwarnen"):
+        if not message.author.guild_permissions.kick_members:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken**!"))
+        elif not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!entwarnen @user`"))
+        else:
+            ziel = message.mentions[0]
+            ziel_id = str(ziel.id)
+            warnungen[ziel_id] = []
+            await message.reply(embed=discord.Embed(description=f"✅ Alle Verwarnungen von {ziel.mention} gelöscht!", color=FARBE_ERFOLG))
+
+    # ─── !lock Befehl ────────────────────────────────────────
+    elif inhalt == "!lock":
+        if not message.author.guild_permissions.manage_channels:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+        else:
+            try:
+                overwrite = message.channel.overwrites_for(message.guild.default_role)
+                overwrite.send_messages = False
+                await message.channel.set_permissions(message.guild.default_role, overwrite=overwrite)
+                await message.reply(embed=discord.Embed(description="🔒 Kanal gesperrt! Niemand kann mehr schreiben.", color=FARBE_FEHLER))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
+
+    # ─── !unlock Befehl ──────────────────────────────────────
+    elif inhalt == "!unlock":
+        if not message.author.guild_permissions.manage_channels:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+        else:
+            try:
+                overwrite = message.channel.overwrites_for(message.guild.default_role)
+                overwrite.send_messages = None
+                await message.channel.set_permissions(message.guild.default_role, overwrite=overwrite)
+                await message.reply(embed=discord.Embed(description="🔓 Kanal entsperrt! Alle können wieder schreiben.", color=FARBE_ERFOLG))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
+
+    # ─── !slowmode Befehl ────────────────────────────────────
+    elif inhalt.startswith("!slowmode"):
+        if not message.author.guild_permissions.manage_channels:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+        else:
+            teile = inhalt.split(" ")
+            try:
+                sekunden = int(teile[1]) if len(teile) > 1 else 0
+                if sekunden < 0 or sekunden > 21600:
+                    await message.reply(embed=fehler_embed("Zwischen 0 (aus) und 21600 Sekunden (6h)!"))
+                else:
+                    await message.channel.edit(slowmode_delay=sekunden)
+                    if sekunden == 0:
+                        await message.reply(embed=discord.Embed(description="⏱️ Slowmode deaktiviert!", color=FARBE_ERFOLG))
+                    else:
+                        await message.reply(embed=discord.Embed(description=f"⏱️ Slowmode auf **{sekunden} Sekunden** gesetzt!", color=FARBE_TOOL))
+            except ValueError:
+                await message.reply(embed=fehler_embed("Nutze: `!slowmode [sekunden]`"))
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
+
+    # ─── !ankündigung Befehl ──────────────────────────────────
+    elif inhalt.startswith("!ankündigung "):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Nachrichten verwalten**!"))
+        else:
+            text = inhalt[13:]
+            embed = discord.Embed(title="📢 Ankündigung", description=text, color=0xE74C3C)
+            embed.set_footer(text=f"Von {user_name}", icon_url=avatar_url)
+            embed.timestamp = datetime.utcnow()
+            await message.delete()
+            await message.channel.send(content="@everyone", embed=embed)
+
+    # ─── !userinfo Befehl ────────────────────────────────────
+    elif inhalt.startswith("!userinfo"):
+        ziel = message.mentions[0] if message.mentions else message.author
+        embed = discord.Embed(title=f"👤 {ziel.display_name}", color=ziel.color if ziel.color.value != 0 else FARBE_INFO)
+        embed.set_thumbnail(url=ziel.display_avatar.url)
+        embed.add_field(name="Name", value=str(ziel), inline=True)
+        embed.add_field(name="ID", value=ziel.id, inline=True)
+        embed.add_field(name="Konto erstellt", value=ziel.created_at.strftime("%d.%m.%Y"), inline=True)
+        if hasattr(ziel, 'joined_at') and ziel.joined_at:
+            embed.add_field(name="Server beigetreten", value=ziel.joined_at.strftime("%d.%m.%Y"), inline=True)
+        if hasattr(ziel, 'roles'):
+            rollen = ", ".join(r.mention for r in ziel.roles if r.name != "@everyone")
+            embed.add_field(name="Rollen", value=rollen if rollen else "Keine", inline=False)
+        await message.reply(embed=embed)
+
+    # ─── !serverinfo Befehl ──────────────────────────────────
+    elif inhalt == "!serverinfo":
+        guild = message.guild
+        embed = discord.Embed(title=f"🏠 {guild.name}", color=FARBE_INFO)
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        embed.add_field(name="Mitglieder", value=guild.member_count, inline=True)
+        embed.add_field(name="Erstellt am", value=guild.created_at.strftime("%d.%m.%Y"), inline=True)
+        embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unbekannt", inline=True)
+        embed.add_field(name="Kanäle", value=len(guild.channels), inline=True)
+        embed.add_field(name="Rollen", value=len(guild.roles), inline=True)
+        embed.add_field(name="Server ID", value=guild.id, inline=True)
+        await message.reply(embed=embed)
+
+    # ════════════════════════════════════════════════════════
+    # ENDE MODERATION
+    # ════════════════════════════════════════════════════════
+
     # ─── !reset Befehl ─────────────────────────────────────
     elif inhalt == "!reset":
         chat_verlaeufe[user_id] = []
@@ -525,6 +799,15 @@ async def on_message(message):
         ), inline=False)
         embed.add_field(name="⭐ Level", value=(
             "`!level` · `!rangliste`"
+        ), inline=False)
+        embed.add_field(name="🛡️ Moderation (braucht Rechte)", value=(
+            "`!clear [n]` · `!kick @user [grund]` · `!ban @user [grund]`\n"
+            "`!unban [name/id]` · `!mute @user [zeit]` · `!unmute @user`\n"
+            "`!warn @user [grund]` · `!warnungen [@user]` · `!entwarnen @user`\n"
+            "`!lock` · `!unlock` · `!slowmode [sek]` · `!ankündigung [text]`"
+        ), inline=False)
+        embed.add_field(name="ℹ️ Info", value=(
+            "`!userinfo [@user]` · `!serverinfo`"
         ), inline=False)
         embed.set_footer(text=f"Angefordert von {user_name}", icon_url=avatar_url)
         await message.reply(embed=embed)
