@@ -5,7 +5,7 @@ import os
 import random
 import asyncio
 from datetime import datetime, UTC
-BOT_START = datetime.now(UTC), timedelta
+BOT_START = datetime.now(UTC)
 from dotenv import load_dotenv
 
 load_dotenv()
