@@ -4,7 +4,8 @@ import aiohttp
 import os
 import random
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, UTC
+BOT_START = datetime.now(UTC), timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
