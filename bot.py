@@ -1,9 +1,9 @@
 import discord
-from discord import app_commands
 import aiohttp
 import os
 import random
 import asyncio
+import string
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -12,109 +12,97 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+BOT_START = datetime.now(timezone.utc)
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
 
+# ─── Daten ─────────────────────────────────────────────────
 chat_verlaeufe = {}
 persoenlichkeit = {}
 merkliste = {}
 levels = {}
 rate_spiel = {}
 todo_listen = {}
-warnungen = {}           # Verwarnungen pro User
-hangman_spiele = {}      # Laufende Hangman Spiele
-giveaways = {}           # Laufende Giveaways
-quiz_spiele = {}         # Laufende Quiz Spiele
-tictactoe_spiele = {}    # Laufende TicTacToe Spiele
-willkommen_kanal = {}    # Willkommens-Kanal pro Server
-auto_rollen = {}         # Auto-Rollen pro Server
+warnungen = {}
+hangman_spiele = {}
+quiz_spiele = {}
+tictactoe_spiele = {}
+willkommen_kanal = {}
 
-# ─── Hangman Wörter ────────────────────────────────────────
-HANGMAN_WOERTER = [
-    "python", "discord", "programmieren", "computer", "tastatur",
-    "internet", "datenbank", "algorithmus", "software", "hardware",
-    "entwickler", "passwort", "netzwerk", "server", "browser"
-]
-
-HANGMAN_BILDER = [
-    "```\n  +---+\n  |   |\n      |\n      |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n      |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n  |   |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|   |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n      |\n=========```"
-]
-
-# ─── Quiz Fragen ───────────────────────────────────────────
-QUIZ_FRAGEN = [
-    {"frage": "Was ist die Hauptstadt von Deutschland?", "antworten": ["A) München", "B) Berlin", "C) Hamburg", "D) Frankfurt"], "richtig": "B"},
-    {"frage": "Wie viele Planeten hat unser Sonnensystem?", "antworten": ["A) 7", "B) 9", "C) 8", "D) 10"], "richtig": "C"},
-    {"frage": "In welchem Jahr wurde das Internet erfunden?", "antworten": ["A) 1969", "B) 1995", "C) 1983", "D) 1991"], "richtig": "A"},
-    {"frage": "Was ist die schnellste Programmiersprache?", "antworten": ["A) Python", "B) Java", "C) C", "D) JavaScript"], "richtig": "C"},
-    {"frage": "Wie viele Bits hat ein Byte?", "antworten": ["A) 4", "B) 16", "C) 8", "D) 32"], "richtig": "C"},
-    {"frage": "Welches Tier ist das größte der Welt?", "antworten": ["A) Elefant", "B) Blauwal", "C) Hai", "D) Giraffe"], "richtig": "B"},
-    {"frage": "Wie viele Kontinente hat die Erde?", "antworten": ["A) 5", "B) 6", "C) 7", "D) 8"], "richtig": "C"},
-    {"frage": "Was ist H2O?", "antworten": ["A) Salz", "B) Sauerstoff", "C) Wasser", "D) Wasserstoff"], "richtig": "C"},
-    {"frage": "Wer hat die Relativitätstheorie entwickelt?", "antworten": ["A) Newton", "B) Einstein", "C) Hawking", "D) Tesla"], "richtig": "B"},
-    {"frage": "Wie viele Sekunden hat eine Stunde?", "antworten": ["A) 3000", "B) 3200", "C) 3600", "D) 4000"], "richtig": "C"},
-]
-server_config = {}       # Welcome/Autorole Einstellungen pro Server
-ttt_spiele = {}          # Tic-Tac-Toe pro Channel
-hangman_spiele = {}      # Galgenmännchen pro Channel
-quiz_aktiv = {}          # Aktives Quiz pro Channel
-BOT_START = datetime.now(timezone.utc)
-
-HANGMAN_WOERTER = ["PYTHON", "DISCORD", "COMPUTER", "TASTATUR", "BILDSCHIRM", "INTERNET", "PROGRAMM", "ROBOTER", "GALAXIE", "FUSSBALL", "PIZZA", "GITARRE", "ELEFANT", "REGENBOGEN", "ASTRONAUT"]
-
-QUIZ_FRAGEN = [
-    {"frage": "Wie viele Beine hat eine Spinne?", "antwort": "8"},
-    {"frage": "Was ist die Hauptstadt von Deutschland?", "antwort": "Berlin"},
-    {"frage": "Wie viele Kontinente gibt es?", "antwort": "7"},
-    {"frage": "Welcher Planet ist der Sonne am nächsten?", "antwort": "Merkur"},
-    {"frage": "Wie viele Saiten hat eine Standard-Gitarre?", "antwort": "6"},
-    {"frage": "Was ist 7 mal 8?", "antwort": "56"},
-    {"frage": "In welchem Land steht der Eiffelturm?", "antwort": "Frankreich"},
-    {"frage": "Wie viele Tage hat ein Schaltjahr?", "antwort": "366"},
-    {"frage": "Was ist die größte Zahl: Million, Milliarde oder Billion?", "antwort": "Billion"},
-    {"frage": "Wie viele Spieler hat eine Fußballmannschaft auf dem Feld?", "antwort": "11"},
-    {"frage": "Welches Tier ist das größte Landtier der Welt?", "antwort": "Elefant"},
-    {"frage": "Wie viele Farben hat ein Regenbogen?", "antwort": "7"},
-]
-
-# ─── Farben & Design ───────────────────────────────────────
-FARBE_KI = 0x5865F2        # Discord Blau-Violett
-FARBE_ERFOLG = 0x57F287    # Grün
-FARBE_FEHLER = 0xED4245     # Rot
-FARBE_SPIEL = 0xFEE75C      # Gelb
-FARBE_TOOL = 0xEB459E       # Pink
-FARBE_INFO = 0x5DADE2       # Hellblau
+# ─── Design ────────────────────────────────────────────────
+FARBE_KI      = 0x5865F2
+FARBE_ERFOLG  = 0x57F287
+FARBE_FEHLER  = 0xED4245
+FARBE_SPIEL   = 0xFEE75C
+FARBE_TOOL    = 0xEB459E
+FARBE_INFO    = 0x5DADE2
 
 # ─── Persönlichkeiten ──────────────────────────────────────
 PERSONAS = {
-    "anwalt": "Du bist ein seriöser, sachlicher Anwalt. Du antwortest präzise, formell und nutzt gerne Fachbegriffe, erklärst aber alles verständlich. Du sprichst den User mit 'Sie' an.",
-    "mädel": "Du bist eine freche, lustige und herzliche Freundin. Du redest locker, nutzt Emojis 😊✨ und Umgangssprache. Du sprichst den User mit 'du' an.",
-    "lehrer": "Du bist ein geduldiger, motivierender Lehrer. Du erklärst Dinge Schritt für Schritt, einfach und ermutigend. Du lobst Fortschritte.",
-    "pirat": "Du bist ein wilder Pirat! Du sprichst wie ein Pirat (Arrr, Landratte, Schatzkiste etc.), bist abenteuerlustig und übertrieben dramatisch.",
+    "anwalt":   "Du bist ein seriöser Anwalt. Formell, präzise, du sprichst den User mit 'Sie' an.",
+    "mädel":    "Du bist eine freche, lustige Freundin. Locker, mit Emojis 😊✨. Du sagst 'du'.",
+    "lehrer":   "Du bist ein geduldiger Lehrer. Schritt für Schritt, ermutigend.",
+    "pirat":    "Du bist ein wilder Pirat! Arrr, Landratte! Dramatisch und abenteuerlustig.",
     "standard": "Du bist ein hilfreicher Assistent."
 }
-
 PERSONA_INFO = {
-    "anwalt": {"emoji": "🧑‍⚖️", "farbe": 0x2C3E50, "name": "Anwalt"},
-    "mädel": {"emoji": "👧", "farbe": 0xFF6B9D, "name": "Mädel"},
-    "lehrer": {"emoji": "👨‍🏫", "farbe": 0x27AE60, "name": "Lehrer"},
-    "pirat": {"emoji": "🏴‍☠️", "farbe": 0x8B4513, "name": "Pirat"},
-    "standard": {"emoji": "🤖", "farbe": FARBE_KI, "name": "Standard"}
+    "anwalt":   {"emoji": "🧑‍⚖️", "farbe": 0x2C3E50, "name": "Anwalt"},
+    "mädel":    {"emoji": "👧",    "farbe": 0xFF6B9D, "name": "Mädel"},
+    "lehrer":   {"emoji": "👨‍🏫", "farbe": 0x27AE60, "name": "Lehrer"},
+    "pirat":    {"emoji": "🏴‍☠️", "farbe": 0x8B4513, "name": "Pirat"},
+    "standard": {"emoji": "🤖",    "farbe": FARBE_KI, "name": "Standard"},
 }
 
-# ─── Hilfsfunktion: Fehler-Embed ───────────────────────────
+# ─── Hangman ───────────────────────────────────────────────
+HANGMAN_WOERTER = ["python","discord","programmieren","computer","internet",
+                   "datenbank","algorithmus","software","netzwerk","server"]
+HANGMAN_BILDER = [
+    "```\n  +---+\n  |   |\n      |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n  |   |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|   |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n=========```",
+]
+
+# ─── Quiz ──────────────────────────────────────────────────
+QUIZ_FRAGEN = [
+    {"frage":"Was ist die Hauptstadt von Deutschland?","antworten":["A) München","B) Berlin","C) Hamburg","D) Frankfurt"],"richtig":"B"},
+    {"frage":"Wie viele Planeten hat unser Sonnensystem?","antworten":["A) 7","B) 9","C) 8","D) 10"],"richtig":"C"},
+    {"frage":"Was ist H2O?","antworten":["A) Salz","B) Sauerstoff","C) Wasser","D) Wasserstoff"],"richtig":"C"},
+    {"frage":"Wer entwickelte die Relativitätstheorie?","antworten":["A) Newton","B) Einstein","C) Hawking","D) Tesla"],"richtig":"B"},
+    {"frage":"Wie viele Sekunden hat eine Stunde?","antworten":["A) 3000","B) 3200","C) 3600","D) 4000"],"richtig":"C"},
+    {"frage":"Wie viele Bits hat ein Byte?","antworten":["A) 4","B) 16","C) 8","D) 32"],"richtig":"C"},
+    {"frage":"Welches Tier ist das größte der Welt?","antworten":["A) Elefant","B) Blauwal","C) Hai","D) Giraffe"],"richtig":"B"},
+    {"frage":"Wie viele Kontinente hat die Erde?","antworten":["A) 5","B) 6","C) 7","D) 8"],"richtig":"C"},
+]
+
+# ─── Hilfsfunktionen ───────────────────────────────────────
 def fehler_embed(text):
-    embed = discord.Embed(description=f"❌ {text}", color=FARBE_FEHLER)
-    return embed
+    return discord.Embed(description=f"❌ {text}", color=FARBE_FEHLER)
+
+def parse_zeit(text):
+    try:
+        einheit = text[-1].lower()
+        zahl = int(text[:-1])
+        return {"s": zahl, "m": zahl*60, "h": zahl*3600}.get(einheit)
+    except Exception:
+        return None
+
+def xp_geben(user_id, menge=5):
+    if user_id not in levels:
+        levels[user_id] = {"xp": 0, "level": 1}
+    levels[user_id]["xp"] += menge
+    benoetigt = levels[user_id]["level"] * 100
+    if levels[user_id]["xp"] >= benoetigt:
+        levels[user_id]["xp"] -= benoetigt
+        levels[user_id]["level"] += 1
+        return True
+    return False
 
 async def groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=1000):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -123,147 +111,10 @@ async def groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=10
         async with session.post(GROQ_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             data = await resp.json()
             if resp.status != 200:
-                raise Exception(f"Groq Fehler ({resp.status}): {data}")
+                raise Exception(f"Groq Fehler: {data}")
             return data["choices"][0]["message"]["content"]
 
-def xp_geben(user_id, menge=5):
-    if user_id not in levels:
-        levels[user_id] = {"xp": 0, "level": 1}
-    levels[user_id]["xp"] += menge
-    benoetigt = levels[user_id]["level"] * 100
-    aufgestiegen = False
-    if levels[user_id]["xp"] >= benoetigt:
-        levels[user_id]["xp"] -= benoetigt
-        levels[user_id]["level"] += 1
-        aufgestiegen = True
-    return aufgestiegen
-
-def parse_zeit(text):
-    einheit = text[-1].lower()
-    try:
-        zahl = int(text[:-1])
-    except ValueError:
-        return None
-    if einheit == "s":
-        return zahl
-    elif einheit == "m":
-        return zahl * 60
-    elif einheit == "h":
-        return zahl * 3600
-    return None
-
-# ─── Tic-Tac-Toe Hilfsfunktionen ────────────────────────────
-def ttt_anzeigen(board):
-    anzeige = [b if b != " " else "⬜" for b in board]
-    zahlen_overlay = []
-    for i, feld in enumerate(anzeige):
-        if feld == "⬜":
-            nummern = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"]
-            zahlen_overlay.append(nummern[i])
-        else:
-            zahlen_overlay.append(feld)
-    rows = [zahlen_overlay[i:i+3] for i in range(0, 9, 3)]
-    return "\n".join("".join(row) for row in rows)
-
-def ttt_check(board):
-    gewinn_linien = [
-        [0,1,2],[3,4,5],[6,7,8],
-        [0,3,6],[1,4,7],[2,5,8],
-        [0,4,8],[2,4,6]
-    ]
-    for linie in gewinn_linien:
-        werte = [board[i] for i in linie]
-        if werte[0] != " " and werte[0] == werte[1] == werte[2]:
-            return werte[0]
-    if " " not in board:
-        return "unentschieden"
-    return None
-
-def ttt_bot_zug(board):
-    # Versuche zu gewinnen oder zu blocken, sonst zufällig
-    for symbol in ["⭕", "❌"]:
-        for i in range(9):
-            if board[i] == " ":
-                test = board.copy()
-                test[i] = symbol
-                if ttt_check(test) == symbol:
-                    return i
-    freie = [i for i, v in enumerate(board) if v == " "]
-    return random.choice(freie)
-
-def bau_hilfe_embed(user):
-    embed = discord.Embed(
-        title="🤖 Bot-Befehle Übersicht",
-        description=(
-            "**Alle Befehle gibt es als `!befehl` ODER als `/befehl`!**\n"
-            "Tippe `/` in Discord ein und du siehst alle Befehle mit Erklärung. 😊"
-        ),
-        color=FARBE_KI
-    )
-    embed.set_thumbnail(url=bot.user.display_avatar.url)
-
-    embed.add_field(name="🗣️ ── KI & Chat ── 🗣️", value=(
-        "**`ki [frage]`** — Stelle der KI eine Frage\n"
-        "**`persönlichkeit [typ]`** — Charakter wechseln (anwalt/mädel/lehrer/pirat)\n"
-        "**`reset`** — Chat-Verlauf löschen *(nur als `!`)*"
-    ), inline=False)
-
-    embed.add_field(name="🧠 ── Gedächtnis ── 🧠 *(nur als `!`)*", value=(
-        "**`!merke [info]`** — Bot merkt sich etwas über dich\n"
-        "**`!merkliste`** — Zeigt gemerkte Infos\n"
-        "**`!vergiss`** — Löscht alle gemerkten Infos"
-    ), inline=False)
-
-    embed.add_field(name="✍️ ── Text & Kreativ ── ✍️", value=(
-        "**`übersetzen [text]`** — Ins Englische übersetzen\n"
-        "**`zusammenfassen [text]`** — Text kürzen\n"
-        "**`geschichte [thema]`** — Kurze Geschichte schreiben\n"
-        "**`reim [thema]`** — Kleines Gedicht schreiben"
-    ), inline=False)
-
-    embed.add_field(name="🎉 ── Spaß ── 🎉", value=(
-        "**`witz`** · **`zitat`** · **`fakt`** · **`kompliment`**"
-    ), inline=False)
-
-    embed.add_field(name="🎮 ── Spiele ── 🎮 *(nur als `!`)*", value=(
-        "**`!würfel [seiten]`** · **`!münze`**\n"
-        "**`!rate [max]`** — Zahlenraten\n"
-        "**`!ssp [schere/stein/papier]`** — gegen den Bot\n"
-        "**`!ttt`** — Tic-Tac-Toe · **`!hangman`** — Galgenmännchen\n"
-        "**`!quiz`** — Allgemeinwissen"
-    ), inline=False)
-
-    embed.add_field(name="🧮 ── Tools ── 🧮", value=(
-        "**`rechne [rechnung]`** — Taschenrechner\n"
-        "**`!umfrage [frage]`** — Umfrage mit Reaktionen *(nur `!`)*\n"
-        "**`!erinnere [zeit] [text]`** — z.B. `10m Pizza checken` *(nur `!`)*\n"
-        "**`!todo add/liste/done/clear`** — eigene To-Do-Liste *(nur `!`)*"
-    ), inline=False)
-
-    embed.add_field(name="⭐ ── Level-System ── ⭐", value=(
-        "**`level`** — Dein Level & XP\n"
-        "**`rangliste`** — Top 10 des Servers\n"
-        "*Du bekommst XP für `ki`, Spiele gewinnen, Quiz etc.*"
-    ), inline=False)
-
-    embed.add_field(name="ℹ️ ── Info ── ℹ️", value=(
-        "**`ping`** · **`uptime`** · **`avatar [@user]`**\n"
-        "**`userinfo [@user]`** · **`serverinfo`**"
-    ), inline=False)
-
-    embed.add_field(name="🛡️ ── Moderation (braucht Rechte) ── 🛡️", value=(
-        "**`kick`** · **`ban`** · **`mute`** · **`unmute`** · **`warn`** · **`clear`**\n"
-        "*(als `!` zusätzlich: `unban`, `warnungen`, `entwarnen`, `lock`, `unlock`, `slowmode`, `ankündigung`)*"
-    ), inline=False)
-
-    embed.add_field(name="⚙️ ── Server-Einstellungen (braucht Rechte) ── ⚙️ *(nur `!`)*", value=(
-        "**`!setwelcome #kanal [text]`** — Willkommensnachricht (Platzhalter: `{user}`, `{server}`)\n"
-        "**`!removewelcome`** · **`!autorole @rolle`** · **`!removeautorole`**"
-    ), inline=False)
-
-    embed.set_footer(text=f"Angefordert von {user.display_name}", icon_url=user.display_avatar.url)
-    return embed
-
+# ─── Events ────────────────────────────────────────────────
 @bot.event
 async def on_member_join(member):
     guild_id = str(member.guild.id)
@@ -277,45 +128,11 @@ async def on_member_join(member):
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await kanal.send(content=member.mention, embed=embed)
-    if guild_id in auto_rollen:
-        rolle = member.guild.get_role(auto_rollen[guild_id])
-        if rolle:
-            try:
-                await member.add_roles(rolle)
-            except Exception:
-                pass
 
 @bot.event
 async def on_ready():
     print(f"✅ Bot ist online als {bot.user}")
-    await tree.sync()
-    print("✅ Slash-Befehle synchronisiert")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/hilfe oder !hilfe"))
-
-@bot.event
-async def on_member_join(member):
-    guild_id = str(member.guild.id)
-    config = server_config.get(guild_id, {})
-
-    # Auto-Rolle vergeben
-    if "autorole" in config:
-        rolle = member.guild.get_role(config["autorole"])
-        if rolle:
-            try:
-                await member.add_roles(rolle)
-            except discord.Forbidden:
-                pass
-
-    # Willkommensnachricht senden
-    if "welcome_channel" in config:
-        kanal = member.guild.get_channel(config["welcome_channel"])
-        if kanal:
-            text = config.get("welcome_msg", "Willkommen {user} auf **{server}**! 🎉")
-            text = text.replace("{user}", member.mention).replace("{server}", member.guild.name)
-            embed = discord.Embed(title="🎉 Neues Mitglied!", description=text, color=FARBE_ERFOLG)
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.set_footer(text=f"Mitglied #{member.guild.member_count}")
-            await kanal.send(embed=embed)
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="!hilfe"))
 
 @bot.event
 async def on_message(message):
@@ -327,691 +144,639 @@ async def on_message(message):
     user_name = message.author.display_name
     avatar_url = message.author.display_avatar.url
 
-    channel_id = str(message.channel.id)
-
-    # ─── Tic-Tac-Toe: Zug verarbeiten ───────────────────────
-    if channel_id in ttt_spiele and inhalt.strip().isdigit():
-        spiel = ttt_spiele[channel_id]
-        if user_id != spiel["spieler"]:
+    # ── Hangman: Buchstabe raten ──────────────────────────
+    if user_id in hangman_spiele and len(inhalt) == 1 and inhalt.isalpha():
+        spiel = hangman_spiele[user_id]
+        b = inhalt.lower()
+        if b in spiel["geraten"]:
+            await message.reply(embed=discord.Embed(description=f"❗ **{b}** hast du schon versucht!", color=FARBE_SPIEL))
             return
-        pos = int(inhalt.strip()) - 1
-        if 0 <= pos <= 8 and spiel["board"][pos] == " ":
-            spiel["board"][pos] = "❌"
-            gewinner = ttt_check(spiel["board"])
-            if gewinner is None and " " in spiel["board"]:
-                bot_zug = ttt_bot_zug(spiel["board"])
-                spiel["board"][bot_zug] = "⭕"
-                gewinner = ttt_check(spiel["board"])
-
-            brett_text = ttt_anzeigen(spiel["board"])
-            if gewinner == "❌":
-                embed = discord.Embed(title="❌⭕ Tic-Tac-Toe", description=f"{brett_text}\n\n🎉 **Du gewinnst!** +15 XP", color=FARBE_ERFOLG)
-                xp_geben(user_id, 15)
-                del ttt_spiele[channel_id]
-            elif gewinner == "⭕":
-                embed = discord.Embed(title="❌⭕ Tic-Tac-Toe", description=f"{brett_text}\n\n🤖 **Ich gewinne!**", color=FARBE_FEHLER)
-                del ttt_spiele[channel_id]
-            elif gewinner == "unentschieden":
-                embed = discord.Embed(title="❌⭕ Tic-Tac-Toe", description=f"{brett_text}\n\n🤝 **Unentschieden!**", color=FARBE_INFO)
-                del ttt_spiele[channel_id]
-            else:
-                embed = discord.Embed(title="❌⭕ Tic-Tac-Toe", description=f"{brett_text}\n\nDu bist ❌ — schreib eine Zahl (1-9)!", color=FARBE_SPIEL)
-            await message.reply(embed=embed)
-            return
-
-    # ─── Hangman: Buchstabe raten ────────────────────────────
-    if channel_id in hangman_spiele and len(inhalt.strip()) == 1 and inhalt.strip().isalpha():
-        spiel = hangman_spiele[channel_id]
-        buchstabe = inhalt.strip().upper()
-        if buchstabe in spiel["geraten"]:
-            return
-        spiel["geraten"].add(buchstabe)
-        if buchstabe not in spiel["wort"]:
-            spiel["leben"] -= 1
-
-        anzeige = " ".join(b if b in spiel["geraten"] else "_" for b in spiel["wort"])
-        verloren = spiel["leben"] <= 0
-        gewonnen = "_" not in anzeige
-
-        if gewonnen:
-            embed = discord.Embed(title="🪦 Galgenmännchen", description=f"**{anzeige}**\n\n🎉 Gewonnen! Das Wort war **{spiel['wort']}**! +15 XP", color=FARBE_ERFOLG)
-            xp_geben(user_id, 15)
-            del hangman_spiele[channel_id]
-        elif verloren:
-            embed = discord.Embed(title="🪦 Galgenmännchen", description=f"**{anzeige}**\n\n💀 Verloren! Das Wort war **{spiel['wort']}**", color=FARBE_FEHLER)
-            del hangman_spiele[channel_id]
+        spiel["geraten"].append(b)
+        if b not in spiel["wort"]:
+            spiel["falsch"] += 1
+        angezeigt = " ".join(c if c in spiel["geraten"] else "_" for c in spiel["wort"])
+        falsch = [c for c in spiel["geraten"] if c not in spiel["wort"]]
+        if "_" not in angezeigt:
+            del hangman_spiele[user_id]
+            xp_geben(user_id, 30)
+            await message.reply(embed=discord.Embed(title="🎉 Gewonnen!", description=f"Das Wort war: **{spiel['wort']}**\n+30 XP!", color=FARBE_ERFOLG))
+        elif spiel["falsch"] >= 6:
+            del hangman_spiele[user_id]
+            await message.reply(embed=discord.Embed(title="💀 Verloren!", description=f"{HANGMAN_BILDER[6]}\nDas Wort war: **{spiel['wort']}**", color=FARBE_FEHLER))
         else:
-            herzen = "❤️" * spiel["leben"] + "🖤" * (6 - spiel["leben"])
-            geraten_text = ", ".join(sorted(spiel["geraten"])) if spiel["geraten"] else "—"
-            embed = discord.Embed(title="🪦 Galgenmännchen", description=f"**{anzeige}**\n\nLeben: {herzen}\nGeraten: {geraten_text}", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+            embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[spiel['falsch']]}\n`{angezeigt}`", color=FARBE_SPIEL)
+            embed.add_field(name="Falsch", value=" ".join(falsch) or "—", inline=True)
+            embed.add_field(name="Übrig", value=str(6-spiel["falsch"]), inline=True)
+            await message.reply(embed=embed)
         return
 
-    # ─── Quiz: Antwort prüfen ─────────────────────────────────
-    if channel_id in quiz_aktiv:
-        richtige_antwort = quiz_aktiv[channel_id]["antwort"].strip().lower()
-        if inhalt.strip().lower() == richtige_antwort:
+    # ── Quiz: Antwort ─────────────────────────────────────
+    if user_id in quiz_spiele and inhalt.upper() in ["A","B","C","D"]:
+        spiel = quiz_spiele.pop(user_id)
+        if inhalt.upper() == spiel["richtig"]:
             xp_geben(user_id, 15)
-            embed = discord.Embed(title="✅ Richtig!", description=f"Die Antwort war **{quiz_aktiv[channel_id]['antwort']}**!\n{user_name} bekommt **+15 XP** ⭐", color=FARBE_ERFOLG)
-            del quiz_aktiv[channel_id]
-            await message.reply(embed=embed)
-            return
+            await message.reply(embed=discord.Embed(description="✅ **Richtig!** +15 XP ⭐", color=FARBE_ERFOLG))
+        else:
+            await message.reply(embed=discord.Embed(description=f"❌ **Falsch!** Richtige Antwort: **{spiel['richtig']}**", color=FARBE_FEHLER))
+        return
 
-
+    # ── Zahlenraten: Tipp ────────────────────────────────
     if user_id in rate_spiel and inhalt.strip().lstrip("-").isdigit():
         tipp = int(inhalt.strip())
         ziel = rate_spiel[user_id]["zahl"]
         rate_spiel[user_id]["versuche"] += 1
         if tipp == ziel:
-            versuche = rate_spiel[user_id]["versuche"]
+            v = rate_spiel[user_id]["versuche"]
             del rate_spiel[user_id]
             xp_geben(user_id, 20)
-            embed = discord.Embed(title="🎉 Richtig geraten!", description=f"Die Zahl war **{ziel}**!\nDu hast **{versuche}** Versuche gebraucht.", color=FARBE_ERFOLG)
-            embed.add_field(name="Belohnung", value="+20 XP ⭐")
-            await message.reply(embed=embed)
+            await message.reply(embed=discord.Embed(title="🎉 Richtig!", description=f"Die Zahl war **{ziel}**!\n{v} Versuche · +20 XP", color=FARBE_ERFOLG))
         elif tipp < ziel:
             await message.add_reaction("📈")
         else:
             await message.add_reaction("📉")
         return
 
-    # ─── !ki Befehl ────────────────────────────────────────
+    # ── TicTacToe: Zug ───────────────────────────────────
+    if inhalt.strip().isdigit() and 1 <= int(inhalt.strip()) <= 9:
+        for sid, s in list(tictactoe_spiele.items()):
+            if s["spieler"][s["aktuell"]].id == message.author.id:
+                pos = int(inhalt.strip()) - 1
+                if s["brett"][pos] != " ":
+                    await message.reply(embed=fehler_embed("Dieses Feld ist schon belegt!"))
+                    return
+                s["brett"][pos] = s["zeichen"][s["aktuell"]]
+                brett = s["brett"]
+                gewinn = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+                gewinner = None
+                for a,b,c in gewinn:
+                    if brett[a] == brett[b] == brett[c] != " ":
+                        gewinner = s["spieler"][s["aktuell"]]
+                brett_text = (f"`{brett[0]}|{brett[1]}|{brett[2]}`\n"
+                              f"`{brett[3]}|{brett[4]}|{brett[5]}`\n"
+                              f"`{brett[6]}|{brett[7]}|{brett[8]}`").replace(" ","⬜")
+                if gewinner:
+                    del tictactoe_spiele[sid]
+                    xp_geben(str(gewinner.id), 25)
+                    await message.channel.send(embed=discord.Embed(title=f"🎉 {gewinner.display_name} gewinnt!", description=brett_text, color=FARBE_ERFOLG))
+                elif " " not in brett:
+                    del tictactoe_spiele[sid]
+                    await message.channel.send(embed=discord.Embed(title="🤝 Unentschieden!", description=brett_text, color=FARBE_INFO))
+                else:
+                    s["aktuell"] = 1 - s["aktuell"]
+                    naechster = s["spieler"][s["aktuell"]]
+                    embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
+                    embed.add_field(name="Am Zug", value=f"{s['zeichen'][s['aktuell']]} {naechster.mention}")
+                    await message.channel.send(embed=embed)
+                return
+
+    # ════════════════ BEFEHLE ════════════════════════════
+
+    # ── !ki ──────────────────────────────────────────────
     if inhalt.startswith("!ki "):
         frage = inhalt[4:]
         async with message.channel.typing():
             try:
                 if user_id not in chat_verlaeufe:
                     chat_verlaeufe[user_id] = []
-
-                chat_verlaeufe[user_id].append({"role": "user", "content": frage})
+                chat_verlaeufe[user_id].append({"role":"user","content":frage})
                 if len(chat_verlaeufe[user_id]) > 20:
                     chat_verlaeufe[user_id] = chat_verlaeufe[user_id][-20:]
-
-                persona_key = persoenlichkeit.get(user_id, "standard")
-                system_text = PERSONAS[persona_key]
-                p_info = PERSONA_INFO[persona_key]
-
+                p = persoenlichkeit.get(user_id, "standard")
+                sys = PERSONAS[p]
                 if user_id in merkliste and merkliste[user_id]:
-                    fakten = "; ".join(merkliste[user_id])
-                    system_text += f" Wichtige Infos über den User, die du dir merken sollst: {fakten}."
-
-                messages = [{"role": "system", "content": system_text}] + chat_verlaeufe[user_id]
-
-                antwort_text = await groq_anfrage(messages)
-                chat_verlaeufe[user_id].append({"role": "assistant", "content": antwort_text})
-
-                if len(antwort_text) > 4000:
-                    antwort_text = antwort_text[:3997] + "..."
-
+                    sys += f" Infos über den User: {'; '.join(merkliste[user_id])}."
+                msgs = [{"role":"system","content":sys}] + chat_verlaeufe[user_id]
+                antwort = await groq_anfrage(msgs)
+                chat_verlaeufe[user_id].append({"role":"assistant","content":antwort})
+                if len(antwort) > 4000:
+                    antwort = antwort[:3997] + "..."
                 aufgestiegen = xp_geben(user_id, 5)
-
-                embed = discord.Embed(description=antwort_text, color=p_info["farbe"])
-                embed.set_author(name=f"{p_info['emoji']} {p_info['name']}", icon_url=bot.user.display_avatar.url)
+                pi = PERSONA_INFO[p]
+                embed = discord.Embed(description=antwort, color=pi["farbe"])
+                embed.set_author(name=f"{pi['emoji']} {pi['name']}", icon_url=bot.user.display_avatar.url)
                 embed.set_footer(text=f"Gefragt von {user_name} · +5 XP" + (" · 🎉 LEVEL UP!" if aufgestiegen else ""), icon_url=avatar_url)
                 await message.reply(embed=embed)
             except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+                await message.reply(embed=fehler_embed(repr(e)))
 
-    # ─── !persönlichkeit Befehl ────────────────────────────
+    # ── !persönlichkeit ───────────────────────────────────
     elif inhalt.startswith("!persönlichkeit"):
-        teile = inhalt.split(" ")
-        if len(teile) < 2:
+        t = inhalt.split(" ")
+        if len(t) < 2:
             embed = discord.Embed(title="🎭 Persönlichkeiten", color=FARBE_INFO)
-            for key, info in PERSONA_INFO.items():
-                embed.add_field(name=f"{info['emoji']} {info['name']}", value=f"`!persönlichkeit {key}`", inline=True)
+            for k,v in PERSONA_INFO.items():
+                embed.add_field(name=f"{v['emoji']} {v['name']}", value=f"`!persönlichkeit {k}`", inline=True)
             await message.reply(embed=embed)
+        elif t[1].lower() in PERSONAS:
+            w = t[1].lower()
+            persoenlichkeit[user_id] = w
+            pi = PERSONA_INFO[w]
+            begruess = {"anwalt":"Wie kann ich Ihnen helfen?","mädel":"Heyyy! 😊✨","lehrer":"Guten Tag!","pirat":"Arrr! Landratte!","standard":"Bereit!"}
+            await message.reply(embed=discord.Embed(title=f"{pi['emoji']} {pi['name']}", description=begruess[w], color=pi["farbe"]))
         else:
-            wahl = teile[1].lower()
-            if wahl in PERSONAS:
-                persoenlichkeit[user_id] = wahl
-                p_info = PERSONA_INFO[wahl]
-                begruessungen = {
-                    "anwalt": "Wie kann ich Ihnen behilflich sein?",
-                    "mädel": "Heyyy, na was geht ab? 😊✨",
-                    "lehrer": "Guten Tag! Womit kann ich dir heute helfen?",
-                    "pirat": "Arrr! Bereit für ein Abenteuer, Landratte?",
-                    "standard": "Zurück zum Standard-Modus!"
-                }
-                embed = discord.Embed(
-                    title=f"{p_info['emoji']} Persönlichkeit gewechselt",
-                    description=f"**{p_info['name']}**\n\n*{begruessungen[wahl]}*",
-                    color=p_info['farbe']
-                )
-                await message.reply(embed=embed)
-            else:
-                await message.reply(embed=fehler_embed("Unbekannte Persönlichkeit! Nutze `!persönlichkeit` für die Liste."))
+            await message.reply(embed=fehler_embed("Unbekannt! Nutze `!persönlichkeit` für die Liste."))
 
-    # ─── !merke Befehl ──────────────────────────────────────
+    # ── !merke ────────────────────────────────────────────
     elif inhalt.startswith("!merke "):
         info = inhalt[7:]
-        if user_id not in merkliste:
-            merkliste[user_id] = []
+        if user_id not in merkliste: merkliste[user_id] = []
         merkliste[user_id].append(info)
-        embed = discord.Embed(description=f"🧠 Ich merke mir: *{info}*", color=FARBE_ERFOLG)
-        await message.reply(embed=embed)
+        await message.reply(embed=discord.Embed(description=f"🧠 Gemerkt: *{info}*", color=FARBE_ERFOLG))
 
-    # ─── !merkliste Befehl ──────────────────────────────────
     elif inhalt == "!merkliste":
         if user_id in merkliste and merkliste[user_id]:
-            liste = "\n".join(f"• {x}" for x in merkliste[user_id])
-            embed = discord.Embed(title="🧠 Das merke ich mir über dich", description=liste, color=FARBE_INFO)
+            embed = discord.Embed(title="🧠 Meine Notizen über dich", description="\n".join(f"• {x}" for x in merkliste[user_id]), color=FARBE_INFO)
             embed.set_thumbnail(url=avatar_url)
             await message.reply(embed=embed)
         else:
-            await message.reply(embed=discord.Embed(description="🧠 Ich weiß noch nichts über dich! Nutze `!merke [info]`", color=FARBE_INFO))
+            await message.reply(embed=discord.Embed(description="🧠 Noch nichts gemerkt! Nutze `!merke [info]`", color=FARBE_INFO))
 
-    # ─── !vergiss Befehl ────────────────────────────────────
     elif inhalt == "!vergiss":
         merkliste[user_id] = []
-        await message.reply(embed=discord.Embed(description="🗑️ Alles vergessen, was ich mir über dich gemerkt habe!", color=FARBE_ERFOLG))
+        await message.reply(embed=discord.Embed(description="🗑️ Alles vergessen!", color=FARBE_ERFOLG))
 
-    # ─── !übersetzen Befehl ────────────────────────────────
+    # ── !übersetzen ───────────────────────────────────────
     elif inhalt.startswith("!übersetzen "):
         text = inhalt[12:]
         async with message.channel.typing():
             try:
-                messages = [
-                    {"role": "system", "content": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung auf Englisch."},
-                    {"role": "user", "content": text}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
+                antwort = await groq_anfrage([{"role":"system","content":"Übersetze NUR auf Englisch, keine Erklärung."},{"role":"user","content":text}], modell="llama-3.1-8b-instant", max_tokens=500)
                 embed = discord.Embed(title="🌍 Übersetzung", color=FARBE_TOOL)
-                embed.add_field(name="Original (DE)", value=text, inline=False)
-                embed.add_field(name="Englisch", value=antwort_text, inline=False)
+                embed.add_field(name="Original", value=text, inline=False)
+                embed.add_field(name="Englisch", value=antwort, inline=False)
                 await message.reply(embed=embed)
             except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+                await message.reply(embed=fehler_embed(repr(e)))
 
-    # ─── !zusammenfassen Befehl ────────────────────────────
+    # ── !zusammenfassen ───────────────────────────────────
     elif inhalt.startswith("!zusammenfassen "):
         text = inhalt[16:]
         async with message.channel.typing():
             try:
-                messages = [
-                    {"role": "system", "content": "Du fasst Texte kurz und präzise zusammen."},
-                    {"role": "user", "content": text}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
-                embed = discord.Embed(title="📝 Zusammenfassung", description=antwort_text, color=FARBE_TOOL)
+                antwort = await groq_anfrage([{"role":"system","content":"Fasse kurz zusammen."},{"role":"user","content":text}], modell="llama-3.1-8b-instant", max_tokens=500)
+                await message.reply(embed=discord.Embed(title="📝 Zusammenfassung", description=antwort, color=FARBE_TOOL))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !geschichte ───────────────────────────────────────
+    elif inhalt.startswith("!geschichte "):
+        thema = inhalt[12:]
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":"Schreibe eine kurze kreative Geschichte (max 150 Wörter) auf Deutsch."},{"role":"user","content":thema}], max_tokens=400)
+                await message.reply(embed=discord.Embed(title=f"📖 {thema}", description=antwort, color=0x8E44AD))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !reim ─────────────────────────────────────────────
+    elif inhalt.startswith("!reim "):
+        thema = inhalt[6:]
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":"Schreibe ein lustiges 4-zeiliges Gedicht auf Deutsch."},{"role":"user","content":thema}], modell="llama-3.1-8b-instant", max_tokens=200)
+                await message.reply(embed=discord.Embed(title=f"🎤 Reim: {thema}", description=antwort, color=0x8E44AD))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !witz ─────────────────────────────────────────────
+    elif inhalt == "!witz":
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":"Erzähle einen kurzen Witz auf Deutsch. Nur den Witz."},{"role":"user","content":"Witz"}], modell="llama-3.1-8b-instant", max_tokens=200)
+                await message.reply(embed=discord.Embed(title="😂 Witz", description=antwort, color=FARBE_SPIEL))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !zitat ────────────────────────────────────────────
+    elif inhalt == "!zitat":
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":"Gib ein motivierendes Zitat auf Deutsch. Format: 'Zitat' - Autor"},{"role":"user","content":"Zitat"}], modell="llama-3.1-8b-instant", max_tokens=150)
+                await message.reply(embed=discord.Embed(title="💬 Zitat", description=f"*{antwort}*", color=0xF39C12))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !fakt ─────────────────────────────────────────────
+    elif inhalt == "!fakt":
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":"Gib einen überraschenden Fakt auf Deutsch. Nur den Fakt."},{"role":"user","content":"Fakt"}], modell="llama-3.1-8b-instant", max_tokens=150)
+                await message.reply(embed=discord.Embed(title="💡 Wusstest du schon?", description=antwort, color=0x1ABC9C))
+            except Exception as e:
+                await message.reply(embed=fehler_embed(repr(e)))
+
+    # ── !kompliment ───────────────────────────────────────
+    elif inhalt == "!kompliment":
+        async with message.channel.typing():
+            try:
+                antwort = await groq_anfrage([{"role":"system","content":f"Gib ein herzliches Kompliment auf Deutsch an {user_name}. Nur das Kompliment."},{"role":"user","content":"Kompliment"}], modell="llama-3.1-8b-instant", max_tokens=100)
+                embed = discord.Embed(description=f"💖 {antwort}", color=0xFF6B9D)
+                embed.set_thumbnail(url=avatar_url)
                 await message.reply(embed=embed)
             except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+                await message.reply(embed=fehler_embed(repr(e)))
 
-    # ─── !rechne Befehl ──────────────────────────────────────
+    # ── !rechne ───────────────────────────────────────────
     elif inhalt.startswith("!rechne "):
         text = inhalt[8:]
         try:
-            erlaubt = set("0123456789+-*/(). ")
-            if all(c in erlaubt for c in text):
+            if all(c in "0123456789+-*/(). " for c in text):
                 ergebnis = eval(text)
-                embed = discord.Embed(title="🧮 Taschenrechner", color=FARBE_TOOL)
+                embed = discord.Embed(title="🧮 Rechner", color=FARBE_TOOL)
                 embed.add_field(name="Rechnung", value=f"`{text}`", inline=True)
                 embed.add_field(name="Ergebnis", value=f"**{ergebnis}**", inline=True)
                 await message.reply(embed=embed)
             else:
                 await message.reply(embed=fehler_embed("Nur Zahlen und + - * / ( ) erlaubt!"))
         except Exception:
-            await message.reply(embed=fehler_embed("Das konnte ich nicht berechnen!"))
+            await message.reply(embed=fehler_embed("Ungültige Rechnung!"))
 
-    # ─── !würfel Befehl ──────────────────────────────────────
+    # ── !würfel ───────────────────────────────────────────
     elif inhalt.startswith("!würfel"):
-        teile = inhalt.split(" ")
-        seiten = 6
-        if len(teile) > 1 and teile[1].isdigit():
-            seiten = int(teile[1])
-        ergebnis = random.randint(1, seiten)
-        embed = discord.Embed(title="🎲 Würfelwurf", description=f"# {ergebnis}\n(1-{seiten})", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+        t = inhalt.split(" ")
+        seiten = int(t[1]) if len(t) > 1 and t[1].isdigit() else 6
+        await message.reply(embed=discord.Embed(title="🎲 Würfelwurf", description=f"# {random.randint(1,seiten)}\n(1-{seiten})", color=FARBE_SPIEL))
 
-    # ─── !münze Befehl ────────────────────────────────────────
+    # ── !münze ────────────────────────────────────────────
     elif inhalt == "!münze":
-        ergebnis = random.choice(["Kopf", "Zahl"])
-        emoji = "👑" if ergebnis == "Kopf" else "🔢"
-        embed = discord.Embed(title="🪙 Münzwurf", description=f"## {emoji} {ergebnis}", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+        e, r = random.choice([("👑","Kopf"),("🔢","Zahl")])
+        await message.reply(embed=discord.Embed(title="🪙 Münzwurf", description=f"## {e} {r}", color=FARBE_SPIEL))
 
-    # ─── !rate Befehl (Spiel starten) ─────────────────────────
+    # ── !rate ─────────────────────────────────────────────
     elif inhalt.startswith("!rate"):
-        teile = inhalt.split(" ")
-        maxz = 100
-        if len(teile) > 1 and teile[1].isdigit():
-            maxz = int(teile[1])
-        rate_spiel[user_id] = {"zahl": random.randint(1, maxz), "versuche": 0}
-        embed = discord.Embed(title="🔢 Zahlenraten gestartet!", description=f"Ich denke an eine Zahl zwischen **1 und {maxz}**!\nSchreib einfach eine Zahl in den Chat um zu raten!", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+        t = inhalt.split(" ")
+        maxz = int(t[1]) if len(t) > 1 and t[1].isdigit() else 100
+        rate_spiel[user_id] = {"zahl": random.randint(1,maxz), "versuche": 0}
+        await message.reply(embed=discord.Embed(title="🔢 Zahlenraten", description=f"Ich denke an eine Zahl zwischen **1 und {maxz}**!\nSchreib eine Zahl um zu raten!", color=FARBE_SPIEL))
 
-    # ─── !ssp Befehl (Schere Stein Papier) ─────────────────────
+    # ── !ssp ──────────────────────────────────────────────
     elif inhalt.startswith("!ssp "):
-        wahl_user = inhalt[5:].strip().lower()
-        optionen = {"schere": "✂️", "stein": "🪨", "papier": "📄"}
-        if wahl_user not in optionen:
-            await message.reply(embed=fehler_embed("Nutze: `!ssp schere`, `!ssp stein` oder `!ssp papier`"))
+        w = inhalt[5:].strip().lower()
+        opt = {"schere":"✂️","stein":"🪨","papier":"📄"}
+        if w not in opt:
+            await message.reply(embed=fehler_embed("Nutze: `!ssp schere/stein/papier`"))
         else:
-            wahl_bot = random.choice(list(optionen.keys()))
-            if wahl_user == wahl_bot:
-                ergebnis, farbe = "🤝 Unentschieden!", FARBE_INFO
-            elif (wahl_user == "schere" and wahl_bot == "papier") or \
-                 (wahl_user == "stein" and wahl_bot == "schere") or \
-                 (wahl_user == "papier" and wahl_bot == "stein"):
-                ergebnis, farbe = "🎉 Du gewinnst! (+10 XP)", FARBE_ERFOLG
+            wb = random.choice(list(opt.keys()))
+            if w == wb:
+                r, f = "🤝 Unentschieden!", FARBE_INFO
+            elif (w=="schere" and wb=="papier") or (w=="stein" and wb=="schere") or (w=="papier" and wb=="stein"):
+                r, f = "🎉 Du gewinnst! +10 XP", FARBE_ERFOLG
                 xp_geben(user_id, 10)
             else:
-                ergebnis, farbe = "😢 Du verlierst!", FARBE_FEHLER
-            embed = discord.Embed(title="✂️ Schere Stein Papier", color=farbe)
-            embed.add_field(name="Du", value=f"{optionen[wahl_user]}\n{wahl_user}", inline=True)
-            embed.add_field(name="Bot", value=f"{optionen[wahl_bot]}\n{wahl_bot}", inline=True)
-            embed.add_field(name="Ergebnis", value=ergebnis, inline=False)
+                r, f = "😢 Du verlierst!", FARBE_FEHLER
+            embed = discord.Embed(title="✂️ Schere Stein Papier", color=f)
+            embed.add_field(name="Du", value=f"{opt[w]} {w}", inline=True)
+            embed.add_field(name="Bot", value=f"{opt[wb]} {wb}", inline=True)
+            embed.add_field(name="Ergebnis", value=r, inline=False)
             await message.reply(embed=embed)
 
-    # ─── !witz Befehl ────────────────────────────────────────
-    elif inhalt == "!witz":
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": "Erzähle einen kurzen, lustigen Witz auf Deutsch. Nur den Witz, keine Einleitung."},
-                    {"role": "user", "content": "Erzähl mir einen Witz"}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=200)
-                embed = discord.Embed(title="😂 Witz des Tages", description=antwort_text, color=FARBE_SPIEL)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !hangman ──────────────────────────────────────────
+    elif inhalt == "!hangman":
+        wort = random.choice(HANGMAN_WOERTER)
+        hangman_spiele[user_id] = {"wort": wort, "geraten": [], "falsch": 0}
+        angezeigt = " ".join("_" for _ in wort)
+        embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[0]}\n`{angezeigt}`\n\nSchreibe einen Buchstaben!", color=FARBE_SPIEL)
+        await message.reply(embed=embed)
 
-    # ─── !zitat Befehl ───────────────────────────────────────
-    elif inhalt == "!zitat":
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": "Gib ein kurzes, motivierendes Zitat auf Deutsch aus. Nenne auch einen (ggf. erfundenen, aber plausiblen) Autor. Format: 'Zitat' - Autor"},
-                    {"role": "user", "content": "Gib mir ein Zitat"}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=150)
-                embed = discord.Embed(title="💬 Zitat des Tages", description=f"*{antwort_text}*", color=0xF39C12)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !quiz ─────────────────────────────────────────────
+    elif inhalt == "!quiz":
+        frage = random.choice(QUIZ_FRAGEN)
+        quiz_spiele[user_id] = {"richtig": frage["richtig"]}
+        embed = discord.Embed(title="🧠 Quiz", description=f"**{frage['frage']}**\n\n" + "\n".join(frage["antworten"]), color=FARBE_INFO)
+        embed.set_footer(text="Antworte mit A, B, C oder D!")
+        await message.reply(embed=embed)
 
-    # ─── !fakt Befehl ───────────────────────────────────────
-    elif inhalt == "!fakt":
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": "Gib einen kurzen, interessanten und überraschenden Fakt auf Deutsch aus. Nur den Fakt, keine Einleitung."},
-                    {"role": "user", "content": "Gib mir einen Fakt"}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=150)
-                embed = discord.Embed(title="💡 Wusstest du schon?", description=antwort_text, color=0x1ABC9C)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !ttt ──────────────────────────────────────────────
+    elif inhalt.startswith("!ttt "):
+        if not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!ttt @user`"))
+        else:
+            gegner = message.mentions[0]
+            if gegner == message.author or gegner.bot:
+                await message.reply(embed=fehler_embed("Ungültiger Gegner!"))
+            else:
+                sid = f"{user_id}-{gegner.id}"
+                tictactoe_spiele[sid] = {"brett":[" "]*9,"spieler":[message.author,gegner],"aktuell":0,"zeichen":["❌","⭕"]}
+                brett = " ".join(str(i+1) for i in range(9))
+                embed = discord.Embed(title="❌⭕ TicTacToe", description="`1|2|3`\n`4|5|6`\n`7|8|9`", color=FARBE_SPIEL)
+                embed.add_field(name="Spieler", value=f"❌ {message.author.mention}\n⭕ {gegner.mention}")
+                embed.add_field(name="Am Zug", value=f"❌ {message.author.mention}")
+                embed.set_footer(text="Schreibe 1-9 um zu spielen!")
+                await message.channel.send(embed=embed)
 
-    # ─── !kompliment Befehl ───────────────────────────────────
-    elif inhalt == "!kompliment":
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": f"Gib ein kurzes, herzliches und kreatives Kompliment auf Deutsch an eine Person namens {user_name}. Nur das Kompliment."},
-                    {"role": "user", "content": "Gib mir ein Kompliment"}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=100)
-                embed = discord.Embed(description=f"💖 {antwort_text}", color=0xFF6B9D)
-                embed.set_thumbnail(url=avatar_url)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !ship ─────────────────────────────────────────────
+    elif inhalt.startswith("!ship"):
+        if len(message.mentions) >= 2:
+            u1, u2 = message.mentions[0], message.mentions[1]
+        elif len(message.mentions) == 1:
+            u1, u2 = message.author, message.mentions[0]
+        else:
+            await message.reply(embed=fehler_embed("Nutze: `!ship @user1 @user2`"))
+            return
+        random.seed((u1.id + u2.id) % 101)
+        p = random.randint(0, 100)
+        random.seed()
+        emoji = "💕" if p >= 80 else "💖" if p >= 60 else "💛" if p >= 40 else "💔" if p >= 20 else "😬"
+        text = "Perfektes Match!" if p >= 80 else "Sehr gute Chancen!" if p >= 60 else "Naja..." if p >= 40 else "Eher nicht..." if p >= 20 else "Keine Chance!"
+        balken = "❤️"*(p//10) + "🖤"*(10-p//10)
+        await message.reply(embed=discord.Embed(title="💘 Ship-O-Meter", description=f"**{u1.display_name}** & **{u2.display_name}**\n\n{balken}\n**{p}%** {emoji}\n*{text}*", color=0xFF6B9D))
 
-    # ─── !geschichte Befehl ────────────────────────────────────
-    elif inhalt.startswith("!geschichte "):
-        thema = inhalt[12:]
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": "Schreibe eine kurze, kreative Geschichte (max 150 Wörter) auf Deutsch zum gegebenen Thema."},
-                    {"role": "user", "content": thema}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=400)
-                embed = discord.Embed(title=f"📖 {thema}", description=antwort_text, color=0x8E44AD)
-                embed.set_footer(text="✨ KI-generierte Geschichte")
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !avatar ───────────────────────────────────────────
+    elif inhalt.startswith("!avatar"):
+        ziel = message.mentions[0] if message.mentions else message.author
+        embed = discord.Embed(title=f"🖼️ {ziel.display_name}", color=FARBE_INFO)
+        embed.set_image(url=ziel.display_avatar.url)
+        await message.reply(embed=embed)
 
-    # ─── !reim Befehl ─────────────────────────────────────────
-    elif inhalt.startswith("!reim "):
-        thema = inhalt[6:]
-        async with message.channel.typing():
-            try:
-                messages = [
-                    {"role": "system", "content": "Schreibe ein kurzes, lustiges 4-zeiliges Gedicht/Reim auf Deutsch zum gegebenen Thema."},
-                    {"role": "user", "content": thema}
-                ]
-                antwort_text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=200)
-                embed = discord.Embed(title=f"🎤 Reim: {thema}", description=antwort_text, color=0x8E44AD)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(f"Fehler: {repr(e)}"))
+    # ── !passwort ─────────────────────────────────────────
+    elif inhalt.startswith("!passwort"):
+        t = inhalt.split(" ")
+        l = min(max(int(t[1]),8),64) if len(t)>1 and t[1].isdigit() else 16
+        pw = "".join(random.choice(string.ascii_letters+string.digits+"!@#$%^&*") for _ in range(l))
+        embed = discord.Embed(title="🔐 Sicheres Passwort", color=FARBE_TOOL)
+        embed.add_field(name="Passwort", value=f"||`{pw}`||", inline=False)
+        embed.add_field(name="Länge", value=str(l), inline=True)
+        embed.set_footer(text="⚠️ Nur du siehst den Spoiler! Speichere es sicher.")
+        await message.reply(embed=embed)
 
-    # ─── !umfrage Befehl ────────────────────────────────────────
+    # ── !umrechnen ────────────────────────────────────────
+    elif inhalt.startswith("!umrechnen "):
+        t = inhalt.split(" ")
+        if len(t) < 4:
+            await message.reply(embed=discord.Embed(title="🔄 Umrechner", description="Nutze: `!umrechnen [zahl] [von] [zu]`\nz.B. `!umrechnen 100 km miles`\n\n**Unterstützt:** km↔miles, kg↔lbs, celsius↔fahrenheit, liter↔gallonen, euro↔dollar", color=FARBE_TOOL))
+        else:
+            try:
+                zahl = float(t[1])
+                von, zu = t[2].lower(), t[3].lower()
+                umr = {("km","miles"):lambda x:x*0.621371,("miles","km"):lambda x:x*1.60934,
+                       ("kg","lbs"):lambda x:x*2.20462,("lbs","kg"):lambda x:x/2.20462,
+                       ("celsius","fahrenheit"):lambda x:x*9/5+32,("fahrenheit","celsius"):lambda x:(x-32)*5/9,
+                       ("liter","gallonen"):lambda x:x*0.264172,("gallonen","liter"):lambda x:x*3.78541,
+                       ("euro","dollar"):lambda x:x*1.08,("dollar","euro"):lambda x:x/1.08}
+                if (von,zu) in umr:
+                    ergebnis = round(umr[(von,zu)](zahl), 4)
+                    embed = discord.Embed(title="🔄 Umrechnung", color=FARBE_TOOL)
+                    embed.add_field(name="Eingabe", value=f"`{zahl} {von}`", inline=True)
+                    embed.add_field(name="Ergebnis", value=f"**{ergebnis} {zu}**", inline=True)
+                    await message.reply(embed=embed)
+                else:
+                    await message.reply(embed=fehler_embed(f"Kann `{von}` nicht in `{zu}` umrechnen!"))
+            except Exception:
+                await message.reply(embed=fehler_embed("Ungültige Eingabe!"))
+
+    # ── !umfrage ──────────────────────────────────────────
     elif inhalt.startswith("!umfrage "):
         frage = inhalt[9:]
         embed = discord.Embed(title="📊 Umfrage", description=f"## {frage}", color=FARBE_TOOL)
-        embed.set_footer(text=f"Erstellt von {user_name} · Reagiere mit 👍 👎 oder 🤷", icon_url=avatar_url)
-        umfrage_msg = await message.channel.send(embed=embed)
-        await umfrage_msg.add_reaction("👍")
-        await umfrage_msg.add_reaction("👎")
-        await umfrage_msg.add_reaction("🤷")
+        embed.set_footer(text=f"Erstellt von {user_name}", icon_url=avatar_url)
+        msg = await message.channel.send(embed=embed)
+        for r in ["👍","👎","🤷"]: await msg.add_reaction(r)
 
-    # ─── !erinnere Befehl ────────────────────────────────────────
+    # ── !erinnere ─────────────────────────────────────────
     elif inhalt.startswith("!erinnere "):
-        teile = inhalt[10:].split(" ", 1)
-        if len(teile) < 2:
-            await message.reply(embed=fehler_embed("Nutze: `!erinnere 10m Pizza aus dem Ofen holen`\n(s=Sekunden, m=Minuten, h=Stunden)"))
+        t = inhalt[10:].split(" ", 1)
+        if len(t) < 2:
+            await message.reply(embed=fehler_embed("Nutze: `!erinnere 10m Text`"))
         else:
-            sekunden = parse_zeit(teile[0])
-            erinnerung_text = teile[1]
-            if sekunden is None:
-                await message.reply(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `30s`, `1h`"))
-            elif sekunden > 86400:
-                await message.reply(embed=fehler_embed("Maximal 24 Stunden!"))
+            sek = parse_zeit(t[0])
+            if sek is None or sek > 86400:
+                await message.reply(embed=fehler_embed("Ungültige Zeit (max 24h)!"))
             else:
-                embed = discord.Embed(title="⏰ Erinnerung gesetzt", description=f"In **{teile[0]}** erinnere ich dich an:\n*{erinnerung_text}*", color=FARBE_TOOL)
-                await message.reply(embed=embed)
-                await asyncio.sleep(sekunden)
-                erinnerung_embed = discord.Embed(title="🔔 Erinnerung!", description=erinnerung_text, color=0xF39C12)
-                await message.channel.send(content=message.author.mention, embed=erinnerung_embed)
+                await message.reply(embed=discord.Embed(title="⏰ Erinnerung gesetzt", description=f"In **{t[0]}**: *{t[1]}*", color=FARBE_TOOL))
+                await asyncio.sleep(sek)
+                await message.channel.send(content=message.author.mention, embed=discord.Embed(title="🔔 Erinnerung!", description=t[1], color=0xF39C12))
 
-    # ─── !todo Befehl ────────────────────────────────────────────
+    # ── !todo ─────────────────────────────────────────────
     elif inhalt.startswith("!todo"):
-        teile = inhalt.split(" ", 2)
-        if user_id not in todo_listen:
-            todo_listen[user_id] = []
-
-        if len(teile) == 1 or teile[1] == "liste":
+        t = inhalt.split(" ", 2)
+        if user_id not in todo_listen: todo_listen[user_id] = []
+        aktion = t[1] if len(t) > 1 else "liste"
+        if aktion == "liste" or len(t) == 1:
             if not todo_listen[user_id]:
-                await message.reply(embed=discord.Embed(description="📋 Deine To-Do Liste ist leer! Füge etwas hinzu mit `!todo add [aufgabe]`", color=FARBE_TOOL))
+                await message.reply(embed=discord.Embed(description="📋 Liste leer! `!todo add [aufgabe]`", color=FARBE_TOOL))
             else:
-                liste = "\n".join(f"**{i+1}.** {x}" for i, x in enumerate(todo_listen[user_id]))
-                embed = discord.Embed(title="📋 Deine To-Do Liste", description=liste, color=FARBE_TOOL)
-                embed.set_footer(text="Erledigt? Nutze !todo done [nummer]")
-                await message.reply(embed=embed)
-        elif teile[1] == "add" and len(teile) > 2:
-            todo_listen[user_id].append(teile[2])
-            await message.reply(embed=discord.Embed(description=f"✅ Hinzugefügt: *{teile[2]}*", color=FARBE_ERFOLG))
-        elif teile[1] == "done" and len(teile) > 2 and teile[2].isdigit():
-            idx = int(teile[2]) - 1
+                liste = "\n".join(f"**{i+1}.** {x}" for i,x in enumerate(todo_listen[user_id]))
+                await message.reply(embed=discord.Embed(title="📋 To-Do Liste", description=liste, color=FARBE_TOOL))
+        elif aktion == "add" and len(t) > 2:
+            todo_listen[user_id].append(t[2])
+            await message.reply(embed=discord.Embed(description=f"✅ Hinzugefügt: *{t[2]}*", color=FARBE_ERFOLG))
+        elif aktion == "done" and len(t) > 2 and t[2].isdigit():
+            idx = int(t[2])-1
             if 0 <= idx < len(todo_listen[user_id]):
-                erledigt = todo_listen[user_id].pop(idx)
-                await message.reply(embed=discord.Embed(description=f"🎉 Erledigt: *{erledigt}*", color=FARBE_ERFOLG))
-            else:
-                await message.reply(embed=fehler_embed("Ungültige Nummer!"))
-        elif teile[1] == "clear":
+                e = todo_listen[user_id].pop(idx)
+                await message.reply(embed=discord.Embed(description=f"🎉 Erledigt: *{e}*", color=FARBE_ERFOLG))
+        elif aktion == "clear":
             todo_listen[user_id] = []
-            await message.reply(embed=discord.Embed(description="🗑️ To-Do Liste geleert!", color=FARBE_ERFOLG))
+            await message.reply(embed=discord.Embed(description="🗑️ Liste geleert!", color=FARBE_ERFOLG))
+
+    # ── !willkommen ───────────────────────────────────────
+    elif inhalt.startswith("!willkommen"):
+        if not message.author.guild_permissions.manage_guild:
+            await message.reply(embed=fehler_embed("Du brauchst **Server verwalten**!"))
+        elif "aus" in inhalt:
+            willkommen_kanal.pop(str(message.guild.id), None)
+            await message.reply(embed=discord.Embed(description="✅ Willkommen deaktiviert!", color=FARBE_ERFOLG))
         else:
-            await message.reply(embed=fehler_embed("Nutze:\n`!todo add [aufgabe]`\n`!todo liste`\n`!todo done [nummer]`\n`!todo clear`"))
+            willkommen_kanal[str(message.guild.id)] = message.channel.id
+            await message.reply(embed=discord.Embed(description=f"✅ Willkommen in {message.channel.mention} aktiviert!", color=FARBE_ERFOLG))
 
-    # ─── !level / !rang Befehl ──────────────────────────────────
-    elif inhalt == "!level" or inhalt == "!rang":
-        daten = levels.get(user_id, {"xp": 0, "level": 1})
-        benoetigt = daten["level"] * 100
-        balken_voll = int((daten["xp"] / benoetigt) * 10)
-        balken = "🟩" * balken_voll + "⬜" * (10 - balken_voll)
-        embed = discord.Embed(title=f"⭐ Level von {user_name}", color=0xF1C40F)
-        embed.set_thumbnail(url=avatar_url)
-        embed.add_field(name="Level", value=f"**{daten['level']}**", inline=True)
-        embed.add_field(name="XP", value=f"{daten['xp']}/{benoetigt}", inline=True)
-        embed.add_field(name="Fortschritt", value=balken, inline=False)
-        await message.reply(embed=embed)
-
-    # ─── !rangliste Befehl ───────────────────────────────────────
-    elif inhalt == "!rangliste":
-        if not levels:
-            await message.reply(embed=discord.Embed(description="📊 Noch keine Daten vorhanden!", color=FARBE_INFO))
+    # ── !giveaway ─────────────────────────────────────────
+    elif inhalt.startswith("!giveaway "):
+        if not message.author.guild_permissions.manage_guild:
+            await message.reply(embed=fehler_embed("Du brauchst **Server verwalten**!"))
         else:
-            sortiert = sorted(levels.items(), key=lambda x: (x[1]["level"], x[1]["xp"]), reverse=True)[:10]
-            text = ""
-            medaillen = ["🥇", "🥈", "🥉"]
-            for i, (uid, daten) in enumerate(sortiert):
-                try:
-                    user = await bot.fetch_user(int(uid))
-                    name = user.display_name
-                except Exception:
-                    name = f"User {uid}"
-                rang = medaillen[i] if i < 3 else f"**{i+1}.**"
-                text += f"{rang} {name} — Level **{daten['level']}** ({daten['xp']} XP)\n"
-            embed = discord.Embed(title="🏆 Rangliste", description=text, color=0xF1C40F)
-            await message.reply(embed=embed)
+            t = inhalt.split(" ", 2)
+            if len(t) < 3:
+                await message.reply(embed=fehler_embed("Nutze: `!giveaway [zeit] [preis]`"))
+            else:
+                sek = parse_zeit(t[1])
+                if not sek:
+                    await message.reply(embed=fehler_embed("Ungültige Zeit!"))
+                else:
+                    preis = t[2]
+                    embed = discord.Embed(title="🎉 GIVEAWAY!", description=f"**Preis:** {preis}\n**Zeit:** {t[1]}\n\nReagiere mit 🎉 um teilzunehmen!", color=0xF1C40F)
+                    embed.set_footer(text=f"Von {user_name}")
+                    gm = await message.channel.send(embed=embed)
+                    await gm.add_reaction("🎉")
+                    await message.delete()
+                    await asyncio.sleep(sek)
+                    gm = await message.channel.fetch_message(gm.id)
+                    r = discord.utils.get(gm.reactions, emoji="🎉")
+                    teilnehmer = [u async for u in r.users() if not u.bot]
+                    if teilnehmer:
+                        gw = random.choice(teilnehmer)
+                        await message.channel.send(content=gw.mention, embed=discord.Embed(title="🎉 Giveaway beendet!", description=f"**Preis:** {preis}\n**Gewinner:** {gw.mention} 🎊", color=FARBE_ERFOLG))
+                    else:
+                        await message.channel.send(embed=discord.Embed(description="😢 Keine Teilnehmer!", color=FARBE_FEHLER))
 
-    # ════════════════════════════════════════════════════════
-    # 🛡️ MODERATIONS-BEFEHLE (keine API nötig, unbegrenzt!)
-    # ════════════════════════════════════════════════════════
+    # ════════ MODERATION ════════════════════════════════════
 
-    # ─── !clear / !purge Befehl ─────────────────────────────
+    # ── !clear ────────────────────────────────────────────
     elif inhalt.startswith("!clear ") or inhalt.startswith("!purge "):
         if not message.author.guild_permissions.manage_messages:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Nachrichten verwalten**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Nachrichten verwalten**!"))
         else:
-            teile = inhalt.split(" ")
             try:
-                anzahl = int(teile[1])
-                if anzahl < 1 or anzahl > 100:
-                    await message.reply(embed=fehler_embed("Bitte eine Zahl zwischen 1 und 100 angeben!"))
-                else:
-                    deleted = await message.channel.purge(limit=anzahl + 1)  # +1 für den Befehl selbst
-                    embed = discord.Embed(description=f"🧹 **{len(deleted)-1}** Nachrichten gelöscht!", color=FARBE_ERFOLG)
-                    info_msg = await message.channel.send(embed=embed)
+                n = int(inhalt.split(" ")[1])
+                if 1 <= n <= 100:
+                    deleted = await message.channel.purge(limit=n+1)
+                    m = await message.channel.send(embed=discord.Embed(description=f"🧹 **{len(deleted)-1}** Nachrichten gelöscht!", color=FARBE_ERFOLG))
                     await asyncio.sleep(3)
-                    await info_msg.delete()
-            except ValueError:
-                await message.reply(embed=fehler_embed("Nutze: `!clear [anzahl 1-100]`"))
-            except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Nachrichten verwalten**!"))
+                    await m.delete()
+                else:
+                    await message.reply(embed=fehler_embed("Zwischen 1 und 100!"))
+            except (ValueError, discord.Forbidden):
+                await message.reply(embed=fehler_embed("Fehler beim Löschen!"))
 
-    # ─── !kick Befehl ────────────────────────────────────────
+    # ── !kick ─────────────────────────────────────────────
     elif inhalt.startswith("!kick"):
         if not message.author.guild_permissions.kick_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder kicken**!"))
         elif not message.mentions:
             await message.reply(embed=fehler_embed("Nutze: `!kick @user [grund]`"))
         else:
             ziel = message.mentions[0]
-            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
-            if ziel.guild_permissions.administrator:
-                await message.reply(embed=fehler_embed("Du kannst keinen Administrator kicken!"))
-            else:
-                try:
-                    await ziel.kick(reason=f"{grund} (von {user_name})")
-                    embed = discord.Embed(title="👋 Mitglied gekickt", color=FARBE_ERFOLG)
-                    embed.add_field(name="User", value=ziel.mention, inline=True)
-                    embed.add_field(name="Von", value=message.author.mention, inline=True)
-                    embed.add_field(name="Grund", value=grund, inline=False)
-                    await message.reply(embed=embed)
-                except discord.Forbidden:
-                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu kicken! (Rolle zu hoch?)"))
+            grund = " ".join(inhalt.split(" ")[2:]) or "Kein Grund"
+            try:
+                await ziel.kick(reason=grund)
+                embed = discord.Embed(title="👋 Gekickt", color=FARBE_ERFOLG)
+                embed.add_field(name="User", value=ziel.mention, inline=True)
+                embed.add_field(name="Grund", value=grund, inline=True)
+                await message.reply(embed=embed)
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !ban Befehl ─────────────────────────────────────────
+    # ── !ban ──────────────────────────────────────────────
     elif inhalt.startswith("!ban"):
         if not message.author.guild_permissions.ban_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder bannen**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder bannen**!"))
         elif not message.mentions:
             await message.reply(embed=fehler_embed("Nutze: `!ban @user [grund]`"))
         else:
             ziel = message.mentions[0]
-            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
-            if ziel.guild_permissions.administrator:
-                await message.reply(embed=fehler_embed("Du kannst keinen Administrator bannen!"))
-            else:
-                try:
-                    await ziel.ban(reason=f"{grund} (von {user_name})")
-                    embed = discord.Embed(title="🔨 Mitglied gebannt", color=FARBE_FEHLER)
-                    embed.add_field(name="User", value=f"{ziel.mention} ({ziel})", inline=True)
-                    embed.add_field(name="Von", value=message.author.mention, inline=True)
-                    embed.add_field(name="Grund", value=grund, inline=False)
-                    await message.reply(embed=embed)
-                except discord.Forbidden:
-                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu bannen! (Rolle zu hoch?)"))
-
-    # ─── !unban Befehl ───────────────────────────────────────
-    elif inhalt.startswith("!unban "):
-        if not message.author.guild_permissions.ban_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder bannen**!"))
-        else:
-            name_eingabe = inhalt[7:].strip()
+            grund = " ".join(inhalt.split(" ")[2:]) or "Kein Grund"
             try:
-                banne = [entry async for entry in message.guild.bans()]
-                gefunden = None
-                for ban_entry in banne:
-                    if name_eingabe.lower() in str(ban_entry.user).lower() or name_eingabe == str(ban_entry.user.id):
-                        gefunden = ban_entry.user
-                        break
-                if gefunden:
-                    await message.guild.unban(gefunden)
-                    await message.reply(embed=discord.Embed(description=f"✅ **{gefunden}** wurde entbannt!", color=FARBE_ERFOLG))
-                else:
-                    await message.reply(embed=fehler_embed(f"Kein gebannter User mit '{name_eingabe}' gefunden!"))
+                await ziel.ban(reason=grund)
+                embed = discord.Embed(title="🔨 Gebannt", color=FARBE_FEHLER)
+                embed.add_field(name="User", value=str(ziel), inline=True)
+                embed.add_field(name="Grund", value=grund, inline=True)
+                await message.reply(embed=embed)
             except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Mitglieder bannen**!"))
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !mute Befehl (Timeout) ──────────────────────────────
+    # ── !mute ─────────────────────────────────────────────
     elif inhalt.startswith("!mute"):
         if not message.author.guild_permissions.moderate_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout** (moderate_members)!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder timeout**!"))
         elif not message.mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!mute @user [zeit] [grund]` (z.B. `!mute @Leon 10m Spam`)"))
+            await message.reply(embed=fehler_embed("Nutze: `!mute @user [zeit] [grund]`"))
         else:
             ziel = message.mentions[0]
-            teile = inhalt.split(" ", 3)
-            zeit_str = teile[2] if len(teile) > 2 else "10m"
-            grund = teile[3] if len(teile) > 3 else "Kein Grund angegeben"
-            sekunden = parse_zeit(zeit_str)
-            if sekunden is None:
-                await message.reply(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `1h`, `30s`"))
-            elif sekunden > 2419200:  # max 28 Tage
-                await message.reply(embed=fehler_embed("Maximal 28 Tage Timeout möglich!"))
-            elif ziel.guild_permissions.administrator:
-                await message.reply(embed=fehler_embed("Du kannst keinen Administrator muten!"))
-            else:
-                try:
-                    await ziel.timeout(timedelta(seconds=sekunden), reason=f"{grund} (von {user_name})")
-                    embed = discord.Embed(title="🔇 Mitglied gemutet", color=FARBE_SPIEL)
-                    embed.add_field(name="User", value=ziel.mention, inline=True)
-                    embed.add_field(name="Dauer", value=zeit_str, inline=True)
-                    embed.add_field(name="Grund", value=grund, inline=False)
-                    await message.reply(embed=embed)
-                except discord.Forbidden:
-                    await message.reply(embed=fehler_embed("Ich habe keine Berechtigung diesen User zu muten! (Rolle zu hoch?)"))
+            t = inhalt.split(" ", 3)
+            sek = parse_zeit(t[2]) if len(t) > 2 else 600
+            grund = t[3] if len(t) > 3 else "Kein Grund"
+            try:
+                await ziel.timeout(timedelta(seconds=sek), reason=grund)
+                embed = discord.Embed(title="🔇 Gemutet", color=FARBE_SPIEL)
+                embed.add_field(name="User", value=ziel.mention, inline=True)
+                embed.add_field(name="Dauer", value=t[2] if len(t)>2 else "10m", inline=True)
+                embed.add_field(name="Grund", value=grund, inline=False)
+                await message.reply(embed=embed)
+            except discord.Forbidden:
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !unmute Befehl ──────────────────────────────────────
+    # ── !unmute ───────────────────────────────────────────
     elif inhalt.startswith("!unmute"):
         if not message.author.guild_permissions.moderate_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder timeout**!"))
         elif not message.mentions:
             await message.reply(embed=fehler_embed("Nutze: `!unmute @user`"))
         else:
-            ziel = message.mentions[0]
             try:
-                await ziel.timeout(None)
-                await message.reply(embed=discord.Embed(description=f"🔊 {ziel.mention} wurde entmutet!", color=FARBE_ERFOLG))
+                await message.mentions[0].timeout(None)
+                await message.reply(embed=discord.Embed(description=f"🔊 {message.mentions[0].mention} entmutet!", color=FARBE_ERFOLG))
             except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Ich habe keine Berechtigung!"))
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !warn Befehl ─────────────────────────────────────────
+    # ── !warn ─────────────────────────────────────────────
     elif inhalt.startswith("!warn"):
         if not message.author.guild_permissions.kick_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken** um zu verwarnen!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder kicken**!"))
         elif not message.mentions:
             await message.reply(embed=fehler_embed("Nutze: `!warn @user [grund]`"))
         else:
             ziel = message.mentions[0]
-            ziel_id = str(ziel.id)
-            grund = inhalt.split(" ", 2)[2] if len(inhalt.split(" ", 2)) > 2 else "Kein Grund angegeben"
-            if ziel_id not in warnungen:
-                warnungen[ziel_id] = []
-            warnungen[ziel_id].append({"grund": grund, "von": user_name})
-            anzahl = len(warnungen[ziel_id])
-            embed = discord.Embed(title="⚠️ Verwarnung erteilt", color=FARBE_SPIEL)
+            zid = str(ziel.id)
+            grund = " ".join(inhalt.split(" ")[2:]) or "Kein Grund"
+            if zid not in warnungen: warnungen[zid] = []
+            warnungen[zid].append({"grund": grund, "von": user_name})
+            embed = discord.Embed(title="⚠️ Verwarnung", color=FARBE_SPIEL)
             embed.add_field(name="User", value=ziel.mention, inline=True)
-            embed.add_field(name="Anzahl Verwarnungen", value=f"**{anzahl}**", inline=True)
+            embed.add_field(name="Verwarnungen", value=str(len(warnungen[zid])), inline=True)
             embed.add_field(name="Grund", value=grund, inline=False)
-            if anzahl >= 3:
-                embed.add_field(name="⚠️ Achtung", value="Dieser User hat **3 oder mehr** Verwarnungen!", inline=False)
             await message.reply(embed=embed)
 
-    # ─── !warnungen Befehl ────────────────────────────────────
+    # ── !warnungen ────────────────────────────────────────
     elif inhalt.startswith("!warnungen"):
         ziel = message.mentions[0] if message.mentions else message.author
-        ziel_id = str(ziel.id)
-        if ziel_id not in warnungen or not warnungen[ziel_id]:
+        zid = str(ziel.id)
+        if zid not in warnungen or not warnungen[zid]:
             await message.reply(embed=discord.Embed(description=f"✅ {ziel.mention} hat keine Verwarnungen!", color=FARBE_ERFOLG))
         else:
-            text = "\n".join(f"**{i+1}.** {w['grund']} *(von {w['von']})*" for i, w in enumerate(warnungen[ziel_id]))
-            embed = discord.Embed(title=f"⚠️ Verwarnungen von {ziel.display_name}", description=text, color=FARBE_SPIEL)
-            embed.set_thumbnail(url=ziel.display_avatar.url)
-            await message.reply(embed=embed)
+            text = "\n".join(f"**{i+1}.** {w['grund']} *(von {w['von']})*" for i,w in enumerate(warnungen[zid]))
+            await message.reply(embed=discord.Embed(title=f"⚠️ Verwarnungen: {ziel.display_name}", description=text, color=FARBE_SPIEL))
 
-    # ─── !entwarnen Befehl ─────────────────────────────────────
+    # ── !entwarnen ────────────────────────────────────────
     elif inhalt.startswith("!entwarnen"):
         if not message.author.guild_permissions.kick_members:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken**!"))
-        elif not message.mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!entwarnen @user`"))
-        else:
-            ziel = message.mentions[0]
-            ziel_id = str(ziel.id)
-            warnungen[ziel_id] = []
-            await message.reply(embed=discord.Embed(description=f"✅ Alle Verwarnungen von {ziel.mention} gelöscht!", color=FARBE_ERFOLG))
+            await message.reply(embed=fehler_embed("Du brauchst **Mitglieder kicken**!"))
+        elif message.mentions:
+            warnungen[str(message.mentions[0].id)] = []
+            await message.reply(embed=discord.Embed(description=f"✅ Verwarnungen von {message.mentions[0].mention} gelöscht!", color=FARBE_ERFOLG))
 
-    # ─── !lock Befehl ────────────────────────────────────────
+    # ── !lock ─────────────────────────────────────────────
     elif inhalt == "!lock":
         if not message.author.guild_permissions.manage_channels:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Kanäle verwalten**!"))
         else:
             try:
-                overwrite = message.channel.overwrites_for(message.guild.default_role)
-                overwrite.send_messages = False
-                await message.channel.set_permissions(message.guild.default_role, overwrite=overwrite)
-                await message.reply(embed=discord.Embed(description="🔒 Kanal gesperrt! Niemand kann mehr schreiben.", color=FARBE_FEHLER))
+                ow = message.channel.overwrites_for(message.guild.default_role)
+                ow.send_messages = False
+                await message.channel.set_permissions(message.guild.default_role, overwrite=ow)
+                await message.reply(embed=discord.Embed(description="🔒 Kanal gesperrt!", color=FARBE_FEHLER))
             except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !unlock Befehl ──────────────────────────────────────
+    # ── !unlock ───────────────────────────────────────────
     elif inhalt == "!unlock":
         if not message.author.guild_permissions.manage_channels:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Kanäle verwalten**!"))
         else:
             try:
-                overwrite = message.channel.overwrites_for(message.guild.default_role)
-                overwrite.send_messages = None
-                await message.channel.set_permissions(message.guild.default_role, overwrite=overwrite)
-                await message.reply(embed=discord.Embed(description="🔓 Kanal entsperrt! Alle können wieder schreiben.", color=FARBE_ERFOLG))
+                ow = message.channel.overwrites_for(message.guild.default_role)
+                ow.send_messages = None
+                await message.channel.set_permissions(message.guild.default_role, overwrite=ow)
+                await message.reply(embed=discord.Embed(description="🔓 Kanal entsperrt!", color=FARBE_ERFOLG))
             except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
+                await message.reply(embed=fehler_embed("Keine Berechtigung!"))
 
-    # ─── !slowmode Befehl ────────────────────────────────────
+    # ── !slowmode ─────────────────────────────────────────
     elif inhalt.startswith("!slowmode"):
         if not message.author.guild_permissions.manage_channels:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Kanäle verwalten**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Kanäle verwalten**!"))
         else:
-            teile = inhalt.split(" ")
+            t = inhalt.split(" ")
             try:
-                sekunden = int(teile[1]) if len(teile) > 1 else 0
-                if sekunden < 0 or sekunden > 21600:
-                    await message.reply(embed=fehler_embed("Zwischen 0 (aus) und 21600 Sekunden (6h)!"))
-                else:
-                    await message.channel.edit(slowmode_delay=sekunden)
-                    if sekunden == 0:
-                        await message.reply(embed=discord.Embed(description="⏱️ Slowmode deaktiviert!", color=FARBE_ERFOLG))
-                    else:
-                        await message.reply(embed=discord.Embed(description=f"⏱️ Slowmode auf **{sekunden} Sekunden** gesetzt!", color=FARBE_TOOL))
-            except ValueError:
+                sek = int(t[1]) if len(t) > 1 else 0
+                await message.channel.edit(slowmode_delay=sek)
+                await message.reply(embed=discord.Embed(description=f"⏱️ Slowmode: **{sek}s**" if sek else "⏱️ Slowmode deaktiviert!", color=FARBE_TOOL))
+            except Exception:
                 await message.reply(embed=fehler_embed("Nutze: `!slowmode [sekunden]`"))
-            except discord.Forbidden:
-                await message.reply(embed=fehler_embed("Mir fehlt die Berechtigung **Kanäle verwalten**!"))
 
-    # ─── !ankündigung Befehl ──────────────────────────────────
+    # ── !ankündigung ──────────────────────────────────────
     elif inhalt.startswith("!ankündigung "):
         if not message.author.guild_permissions.manage_messages:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Nachrichten verwalten**!"))
+            await message.reply(embed=fehler_embed("Du brauchst **Nachrichten verwalten**!"))
         else:
             text = inhalt[13:]
             embed = discord.Embed(title="📢 Ankündigung", description=text, color=0xE74C3C)
@@ -1020,902 +785,91 @@ async def on_message(message):
             await message.delete()
             await message.channel.send(content="@everyone", embed=embed)
 
-    # ─── !userinfo Befehl ────────────────────────────────────
+    # ── !userinfo ─────────────────────────────────────────
     elif inhalt.startswith("!userinfo"):
         ziel = message.mentions[0] if message.mentions else message.author
-        embed = discord.Embed(title=f"👤 {ziel.display_name}", color=ziel.color if ziel.color.value != 0 else FARBE_INFO)
+        embed = discord.Embed(title=f"👤 {ziel.display_name}", color=FARBE_INFO)
         embed.set_thumbnail(url=ziel.display_avatar.url)
         embed.add_field(name="Name", value=str(ziel), inline=True)
-        embed.add_field(name="ID", value=ziel.id, inline=True)
-        embed.add_field(name="Konto erstellt", value=ziel.created_at.strftime("%d.%m.%Y"), inline=True)
-        if hasattr(ziel, 'joined_at') and ziel.joined_at:
-            embed.add_field(name="Server beigetreten", value=ziel.joined_at.strftime("%d.%m.%Y"), inline=True)
-        if hasattr(ziel, 'roles'):
+        embed.add_field(name="ID", value=str(ziel.id), inline=True)
+        embed.add_field(name="Erstellt", value=ziel.created_at.strftime("%d.%m.%Y"), inline=True)
+        if hasattr(ziel, "joined_at") and ziel.joined_at:
+            embed.add_field(name="Beigetreten", value=ziel.joined_at.strftime("%d.%m.%Y"), inline=True)
+        if hasattr(ziel, "roles"):
             rollen = ", ".join(r.mention for r in ziel.roles if r.name != "@everyone")
-            embed.add_field(name="Rollen", value=rollen if rollen else "Keine", inline=False)
+            embed.add_field(name="Rollen", value=rollen or "Keine", inline=False)
         await message.reply(embed=embed)
 
-    # ─── !serverinfo Befehl ──────────────────────────────────
+    # ── !serverinfo ───────────────────────────────────────
     elif inhalt == "!serverinfo":
-        guild = message.guild
-        embed = discord.Embed(title=f"🏠 {guild.name}", color=FARBE_INFO)
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
-        embed.add_field(name="Mitglieder", value=guild.member_count, inline=True)
-        embed.add_field(name="Erstellt am", value=guild.created_at.strftime("%d.%m.%Y"), inline=True)
-        embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unbekannt", inline=True)
-        embed.add_field(name="Kanäle", value=len(guild.channels), inline=True)
-        embed.add_field(name="Rollen", value=len(guild.roles), inline=True)
-        embed.add_field(name="Server ID", value=guild.id, inline=True)
+        g = message.guild
+        embed = discord.Embed(title=f"🏠 {g.name}", color=FARBE_INFO)
+        if g.icon: embed.set_thumbnail(url=g.icon.url)
+        embed.add_field(name="Mitglieder", value=str(g.member_count), inline=True)
+        embed.add_field(name="Erstellt", value=g.created_at.strftime("%d.%m.%Y"), inline=True)
+        embed.add_field(name="Owner", value=g.owner.mention if g.owner else "?", inline=True)
+        embed.add_field(name="Kanäle", value=str(len(g.channels)), inline=True)
+        embed.add_field(name="Rollen", value=str(len(g.roles)), inline=True)
         await message.reply(embed=embed)
 
-    # ════════════════════════════════════════════════════════
-    # ENDE MODERATION
-    # ════════════════════════════════════════════════════════
-
-    # ════════════════════════════════════════════════════════
-    # 🎮 NEUE SPIELE (keine KI nötig!)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !ttt Befehl (Tic-Tac-Toe starten) ──────────────────
-    elif inhalt == "!ttt":
-        ttt_spiele[channel_id] = {"board": [" "]*9, "spieler": user_id}
-        brett_text = ttt_anzeigen(ttt_spiele[channel_id]["board"])
-        embed = discord.Embed(title="❌⭕ Tic-Tac-Toe gestartet!", description=f"{brett_text}\n\nDu bist ❌, ich bin ⭕.\nSchreib eine Zahl (1-9) um zu spielen!", color=FARBE_SPIEL)
-        embed.set_footer(text=f"Gestartet von {user_name}")
-        await message.reply(embed=embed)
-
-    # ─── !hangman Befehl (Galgenmännchen starten) ───────────
-    elif inhalt == "!hangman":
-        wort = random.choice(HANGMAN_WOERTER)
-        hangman_spiele[channel_id] = {"wort": wort, "geraten": set(), "leben": 6}
-        anzeige = " ".join("_" for _ in wort)
-        embed = discord.Embed(title="🪦 Galgenmännchen gestartet!", description=f"**{anzeige}**\n\nLeben: ❤️❤️❤️❤️❤️❤️\n\nRate Buchstaben, indem du sie einfach in den Chat schreibst!", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
-
-    # ─── !quiz Befehl ────────────────────────────────────────
-    elif inhalt == "!quiz":
-        frage = random.choice(QUIZ_FRAGEN)
-        quiz_aktiv[channel_id] = frage
-        embed = discord.Embed(title="❓ Quiz-Zeit!", description=f"**{frage['frage']}**\n\nSchreib deine Antwort in den Chat!", color=FARBE_SPIEL)
-        embed.set_footer(text="+15 XP für die richtige Antwort")
-        await message.reply(embed=embed)
-
-    # ════════════════════════════════════════════════════════
-    # 🛠️ SERVER-TOOLS (keine KI nötig!)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !setwelcome Befehl ──────────────────────────────────
-    elif inhalt.startswith("!setwelcome"):
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
-        elif not message.channel_mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!setwelcome #kanal [optional: Nachricht mit {user} und {server}]`"))
-        else:
-            guild_id = str(message.guild.id)
-            if guild_id not in server_config:
-                server_config[guild_id] = {}
-            server_config[guild_id]["welcome_channel"] = message.channel_mentions[0].id
-
-            # Nachricht extrahieren (alles nach dem Kanal-Mention)
-            rest = inhalt.split(">", 1)
-            if len(rest) > 1 and rest[1].strip():
-                server_config[guild_id]["welcome_msg"] = rest[1].strip()
-
-            embed = discord.Embed(title="✅ Willkommens-Nachricht eingerichtet!", color=FARBE_ERFOLG)
-            embed.add_field(name="Kanal", value=message.channel_mentions[0].mention, inline=True)
-            embed.add_field(name="Nachricht", value=server_config[guild_id].get("welcome_msg", "Willkommen {user} auf **{server}**! 🎉"), inline=False)
-            embed.set_footer(text="Platzhalter: {user} = Mitglied, {server} = Servername")
-            await message.reply(embed=embed)
-
-    # ─── !removewelcome Befehl ────────────────────────────────
-    elif inhalt == "!removewelcome":
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
-        else:
-            guild_id = str(message.guild.id)
-            if guild_id in server_config:
-                server_config[guild_id].pop("welcome_channel", None)
-                server_config[guild_id].pop("welcome_msg", None)
-            await message.reply(embed=discord.Embed(description="✅ Willkommens-Nachricht deaktiviert!", color=FARBE_ERFOLG))
-
-    # ─── !autorole Befehl ──────────────────────────────────────
-    elif inhalt.startswith("!autorole"):
-        if not message.author.guild_permissions.manage_roles:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Rollen verwalten**!"))
-        elif not message.role_mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!autorole @rolle`"))
-        else:
-            guild_id = str(message.guild.id)
-            if guild_id not in server_config:
-                server_config[guild_id] = {}
-            rolle = message.role_mentions[0]
-            server_config[guild_id]["autorole"] = rolle.id
-            embed = discord.Embed(description=f"✅ Neue Mitglieder bekommen automatisch die Rolle {rolle.mention}!", color=FARBE_ERFOLG)
-            await message.reply(embed=embed)
-
-    # ─── !removeautorole Befehl ────────────────────────────────
-    elif inhalt == "!removeautorole":
-        if not message.author.guild_permissions.manage_roles:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Rollen verwalten**!"))
-        else:
-            guild_id = str(message.guild.id)
-            if guild_id in server_config:
-                server_config[guild_id].pop("autorole", None)
-            await message.reply(embed=discord.Embed(description="✅ Auto-Rolle deaktiviert!", color=FARBE_ERFOLG))
-
-    # ════════════════════════════════════════════════════════
-    # ℹ️ INFO-BEFEHLE (keine KI nötig!)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !ping Befehl ────────────────────────────────────────
+    # ── !ping ─────────────────────────────────────────────
     elif inhalt == "!ping":
         latenz = round(bot.latency * 1000)
-        embed = discord.Embed(title="🏓 Pong!", description=f"Latenz: **{latenz}ms**", color=FARBE_ERFOLG if latenz < 200 else FARBE_SPIEL)
-        await message.reply(embed=embed)
+        farbe = FARBE_ERFOLG if latenz < 100 else FARBE_SPIEL if latenz < 200 else FARBE_FEHLER
+        await message.reply(embed=discord.Embed(title="🏓 Pong!", description=f"**{latenz}ms**", color=farbe))
 
-    # ─── !uptime Befehl ──────────────────────────────────────
+    # ── !uptime ───────────────────────────────────────────
     elif inhalt == "!uptime":
         delta = datetime.now(timezone.utc) - BOT_START
-        tage, rest = divmod(int(delta.total_seconds()), 86400)
-        stunden, rest = divmod(rest, 3600)
-        minuten, sekunden = divmod(rest, 60)
-        text = f"{tage}d {stunden}h {minuten}m {sekunden}s"
-        embed = discord.Embed(title="⏱️ Bot Uptime", description=f"Online seit: **{text}**", color=FARBE_INFO)
+        h, rem = divmod(int(delta.total_seconds()), 3600)
+        m, s = divmod(rem, 60)
+        await message.reply(embed=discord.Embed(title="⏱️ Uptime", description=f"**{h}h {m}m {s}s**", color=FARBE_INFO))
+
+    # ── !level ────────────────────────────────────────────
+    elif inhalt in ("!level", "!rang"):
+        d = levels.get(user_id, {"xp":0,"level":1})
+        ben = d["level"]*100
+        bal = "🟩"*(d["xp"]*10//ben) + "⬜"*(10-d["xp"]*10//ben)
+        embed = discord.Embed(title=f"⭐ {user_name}", color=0xF1C40F)
+        embed.set_thumbnail(url=avatar_url)
+        embed.add_field(name="Level", value=f"**{d['level']}**", inline=True)
+        embed.add_field(name="XP", value=f"{d['xp']}/{ben}", inline=True)
+        embed.add_field(name="Fortschritt", value=bal, inline=False)
         await message.reply(embed=embed)
 
-    # ─── !avatar Befehl ───────────────────────────────────────
-    elif inhalt.startswith("!avatar"):
-        ziel = message.mentions[0] if message.mentions else message.author
-        embed = discord.Embed(title=f"🖼️ Avatar von {ziel.display_name}", color=FARBE_INFO)
-        embed.set_image(url=ziel.display_avatar.url)
-        await message.reply(embed=embed)
-
-    # ════════════════════════════════════════════════════════
-    # ENDE NEUE FUNKTIONEN
-    # ════════════════════════════════════════════════════════
-
-    # ════════════════════════════════════════════════════════
-    # 🎮 SPIELE (Hangman, Quiz, TicTacToe)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !hangman Befehl ─────────────────────────────────────
-    elif inhalt == "!hangman":
-        wort = random.choice(HANGMAN_WOERTER)
-        hangman_spiele[user_id] = {"wort": wort, "geraten": [], "falsch": 0}
-        angezeigt = " ".join("_" if b not in [] else b for b in wort)
-        embed = discord.Embed(title="🎯 Hangman gestartet!", description=f"{HANGMAN_BILDER[0]}\n\n`{angezeigt}`\n\nSchreibe einen Buchstaben um zu raten!", color=FARBE_SPIEL)
-        embed.set_footer(text="Tipp: Schreib einfach einen Buchstaben in den Chat!")
-        await message.reply(embed=embed)
-
-    # ─── !hangman: Buchstabe raten ───────────────────────────
-    elif user_id in hangman_spiele and len(inhalt) == 1 and inhalt.isalpha():
-        spiel = hangman_spiele[user_id]
-        buchstabe = inhalt.lower()
-        if buchstabe in spiel["geraten"]:
-            await message.reply(embed=discord.Embed(description=f"❗ Du hast **{buchstabe}** schon versucht!", color=FARBE_SPIEL))
+    # ── !rangliste ────────────────────────────────────────
+    elif inhalt == "!rangliste":
+        if not levels:
+            await message.reply(embed=discord.Embed(description="📊 Noch keine Daten!", color=FARBE_INFO))
         else:
-            spiel["geraten"].append(buchstabe)
-            if buchstabe not in spiel["wort"]:
-                spiel["falsch"] += 1
+            sortiert = sorted(levels.items(), key=lambda x:(x[1]["level"],x[1]["xp"]), reverse=True)[:10]
+            medaillen = ["🥇","🥈","🥉"]
+            text = ""
+            for i,(uid,d) in enumerate(sortiert):
+                try: name = (await bot.fetch_user(int(uid))).display_name
+                except: name = f"User {uid}"
+                rang = medaillen[i] if i < 3 else f"**{i+1}.**"
+                text += f"{rang} {name} — Lv.**{d['level']}** ({d['xp']} XP)\n"
+            await message.reply(embed=discord.Embed(title="🏆 Rangliste", description=text, color=0xF1C40F))
 
-            angezeigt = " ".join(b if b in spiel["geraten"] else "_" for b in spiel["wort"])
-            falsch_buchstaben = [b for b in spiel["geraten"] if b not in spiel["wort"]]
-
-            if "_" not in angezeigt:
-                del hangman_spiele[user_id]
-                xp_geben(user_id, 30)
-                embed = discord.Embed(title="🎉 Gewonnen!", description=f"Das Wort war: **{spiel['wort']}**\n+30 XP!", color=FARBE_ERFOLG)
-                await message.reply(embed=embed)
-            elif spiel["falsch"] >= 6:
-                del hangman_spiele[user_id]
-                embed = discord.Embed(title="💀 Verloren!", description=f"{HANGMAN_BILDER[6]}\n\nDas Wort war: **{spiel['wort']}**", color=FARBE_FEHLER)
-                await message.reply(embed=embed)
-            else:
-                embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[spiel['falsch']]}\n\n`{angezeigt}`", color=FARBE_SPIEL)
-                embed.add_field(name="Falsche Buchstaben", value=" ".join(falsch_buchstaben) if falsch_buchstaben else "Keine", inline=True)
-                embed.add_field(name="Versuche übrig", value=str(6 - spiel["falsch"]), inline=True)
-                await message.reply(embed=embed)
-
-    # ─── !quiz Befehl ────────────────────────────────────────
-    elif inhalt == "!quiz":
-        frage = random.choice(QUIZ_FRAGEN)
-        quiz_spiele[user_id] = {"richtig": frage["richtig"]}
-        embed = discord.Embed(title="🧠 Quiz", description=f"**{frage['frage']}**\n\n" + "\n".join(frage["antworten"]), color=FARBE_INFO)
-        embed.set_footer(text="Antworte mit A, B, C oder D!")
-        await message.reply(embed=embed)
-
-    # ─── !quiz Antwort ───────────────────────────────────────
-    elif user_id in quiz_spiele and inhalt.upper() in ["A", "B", "C", "D"]:
-        spiel = quiz_spiele.pop(user_id)
-        if inhalt.upper() == spiel["richtig"]:
-            xp_geben(user_id, 15)
-            await message.reply(embed=discord.Embed(description="✅ **Richtig!** +15 XP ⭐", color=FARBE_ERFOLG))
-        else:
-            await message.reply(embed=discord.Embed(description=f"❌ **Falsch!** Die richtige Antwort war **{spiel['richtig']}**", color=FARBE_FEHLER))
-
-    # ─── !ttt Befehl (TicTacToe) ─────────────────────────────
-    elif inhalt.startswith("!ttt "):
-        if not message.mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!ttt @user`"))
-        else:
-            gegner = message.mentions[0]
-            if gegner == message.author:
-                await message.reply(embed=fehler_embed("Du kannst nicht gegen dich selbst spielen!"))
-            elif gegner.bot:
-                await message.reply(embed=fehler_embed("Du kannst nicht gegen einen Bot spielen!"))
-            else:
-                spiel_id = f"{user_id}-{gegner.id}"
-                tictactoe_spiele[spiel_id] = {
-                    "brett": [" "] * 9,
-                    "spieler": [message.author, gegner],
-                    "aktuell": 0,
-                    "zeichen": ["❌", "⭕"]
-                }
-                brett = tictactoe_spiele[spiel_id]["brett"]
-                brett_text = f"`1️⃣{brett[0]}|2️⃣{brett[1]}|3️⃣{brett[2]}`\n`4️⃣{brett[3]}|5️⃣{brett[4]}|6️⃣{brett[5]}`\n`7️⃣{brett[6]}|8️⃣{brett[7]}|9️⃣{brett[8]}`"
-                embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
-                embed.add_field(name="Spieler", value=f"❌ {message.author.mention}\n⭕ {gegner.mention}", inline=True)
-                embed.add_field(name="Am Zug", value=f"❌ {message.author.mention}", inline=True)
-                embed.set_footer(text="Schreibe eine Zahl (1-9) um zu spielen!")
-                await message.channel.send(embed=embed)
-
-    # ─── TicTacToe: Zug ─────────────────────────────────────
-    elif inhalt.strip().isdigit() and 1 <= int(inhalt.strip()) <= 9:
-        # Suche ob User in einem TicTacToe-Spiel ist
-        spiel_id = None
-        spiel = None
-        for sid, s in tictactoe_spiele.items():
-            if s["spieler"][s["aktuell"]].id == message.author.id:
-                spiel_id = sid
-                spiel = s
-                break
-
-        if spiel:
-            pos = int(inhalt.strip()) - 1
-            if spiel["brett"][pos] != " ":
-                await message.reply(embed=fehler_embed("Dieses Feld ist schon belegt!"))
-            else:
-                spiel["brett"][pos] = spiel["zeichen"][spiel["aktuell"]]
-                brett = spiel["brett"]
-
-                # Gewinn-Check
-                gewinn_kombinationen = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
-                gewinner = None
-                for a, b, c in gewinn_kombinationen:
-                    if brett[a] == brett[b] == brett[c] != " ":
-                        gewinner = spiel["spieler"][spiel["aktuell"]]
-
-                brett_text = f"`{brett[0]}|{brett[1]}|{brett[2]}`\n`{brett[3]}|{brett[4]}|{brett[5]}`\n`{brett[6]}|{brett[7]}|{brett[8]}`"
-                brett_text = brett_text.replace(" ", "⬜")
-
-                if gewinner:
-                    del tictactoe_spiele[spiel_id]
-                    xp_geben(str(gewinner.id), 25)
-                    embed = discord.Embed(title=f"🎉 {gewinner.display_name} gewinnt!", description=brett_text, color=FARBE_ERFOLG)
-                    embed.add_field(name="Belohnung", value="+25 XP ⭐")
-                    await message.channel.send(embed=embed)
-                elif " " not in brett:
-                    del tictactoe_spiele[spiel_id]
-                    embed = discord.Embed(title="🤝 Unentschieden!", description=brett_text, color=FARBE_INFO)
-                    await message.channel.send(embed=embed)
-                else:
-                    spiel["aktuell"] = 1 - spiel["aktuell"]
-                    naechster = spiel["spieler"][spiel["aktuell"]]
-                    embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
-                    embed.add_field(name="Am Zug", value=f"{spiel['zeichen'][spiel['aktuell']]} {naechster.mention}")
-                    await message.channel.send(embed=embed)
-
-    # ════════════════════════════════════════════════════════
-    # 🛠️ TOOLS (Avatar, Passwort, Umrechnen, Countdown)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !avatar Befehl ──────────────────────────────────────
-    elif inhalt.startswith("!avatar"):
-        ziel = message.mentions[0] if message.mentions else message.author
-        embed = discord.Embed(title=f"🖼️ Avatar von {ziel.display_name}", color=FARBE_INFO)
-        embed.set_image(url=ziel.display_avatar.url)
-        embed.add_field(name="Link", value=f"[Klick hier]({ziel.display_avatar.url})")
-        await message.reply(embed=embed)
-
-    # ─── !passwort Befehl ────────────────────────────────────
-    elif inhalt.startswith("!passwort"):
-        import string
-        teile = inhalt.split(" ")
-        laenge = int(teile[1]) if len(teile) > 1 and teile[1].isdigit() else 16
-        laenge = min(max(laenge, 8), 64)
-        zeichen = string.ascii_letters + string.digits + "!@#$%^&*"
-        passwort = "".join(random.choice(zeichen) for _ in range(laenge))
-        embed = discord.Embed(title="🔐 Sicheres Passwort", color=FARBE_TOOL)
-        embed.add_field(name="Passwort", value=f"||`{passwort}`||", inline=False)
-        embed.add_field(name="Länge", value=str(laenge), inline=True)
-        embed.set_footer(text="⚠️ Nur du kannst das Spoiler-Feld öffnen! Speichere es sicher.")
-        await message.reply(embed=embed)
-
-    # ─── !umrechnen Befehl ───────────────────────────────────
-    elif inhalt.startswith("!umrechnen "):
-        teile = inhalt.split(" ")
-        if len(teile) < 4:
-            embed = discord.Embed(title="🔄 Umrechner", description=(
-                "Nutze: `!umrechnen [zahl] [von] [zu]`\n\n"
-                "**Verfügbar:**\n"
-                "`km` ↔ `miles` ↔ `m`\n"
-                "`kg` ↔ `lbs` ↔ `g`\n"
-                "`celsius` ↔ `fahrenheit`\n"
-                "`liter` ↔ `gallonen`\n"
-                "`euro` ↔ `dollar`"
-            ), color=FARBE_TOOL)
-            await message.reply(embed=embed)
-        else:
-            try:
-                zahl = float(teile[1])
-                von = teile[2].lower()
-                zu = teile[3].lower()
-                umrechnungen = {
-                    ("km", "miles"): lambda x: x * 0.621371,
-                    ("miles", "km"): lambda x: x * 1.60934,
-                    ("km", "m"): lambda x: x * 1000,
-                    ("m", "km"): lambda x: x / 1000,
-                    ("kg", "lbs"): lambda x: x * 2.20462,
-                    ("lbs", "kg"): lambda x: x / 2.20462,
-                    ("kg", "g"): lambda x: x * 1000,
-                    ("g", "kg"): lambda x: x / 1000,
-                    ("celsius", "fahrenheit"): lambda x: x * 9/5 + 32,
-                    ("fahrenheit", "celsius"): lambda x: (x - 32) * 5/9,
-                    ("liter", "gallonen"): lambda x: x * 0.264172,
-                    ("gallonen", "liter"): lambda x: x * 3.78541,
-                    ("euro", "dollar"): lambda x: x * 1.08,
-                    ("dollar", "euro"): lambda x: x / 1.08,
-                }
-                if (von, zu) in umrechnungen:
-                    ergebnis = round(umrechnungen[(von, zu)](zahl), 4)
-                    embed = discord.Embed(title="🔄 Umrechnung", color=FARBE_TOOL)
-                    embed.add_field(name="Eingabe", value=f"`{zahl} {von}`", inline=True)
-                    embed.add_field(name="Ergebnis", value=f"**{ergebnis} {zu}**", inline=True)
-                    await message.reply(embed=embed)
-                else:
-                    await message.reply(embed=fehler_embed(f"Kann `{von}` nicht in `{zu}` umrechnen!"))
-            except ValueError:
-                await message.reply(embed=fehler_embed("Ungültige Zahl!"))
-
-    # ─── !ship Befehl ────────────────────────────────────────
-    elif inhalt.startswith("!ship"):
-        if len(message.mentions) >= 2:
-            u1 = message.mentions[0]
-            u2 = message.mentions[1]
-        elif len(message.mentions) == 1:
-            u1 = message.author
-            u2 = message.mentions[0]
-        else:
-            await message.reply(embed=fehler_embed("Nutze: `!ship @user1 @user2`"))
-            return
-
-        seed = (u1.id + u2.id) % 101
-        random.seed(seed)
-        prozent = random.randint(0, 100)
-        random.seed()
-
-        if prozent >= 80:
-            emoji, text = "💕", "Perfektes Match!"
-        elif prozent >= 60:
-            emoji, text = "💖", "Sehr gute Chancen!"
-        elif prozent >= 40:
-            emoji, text = "💛", "Naja, könnte klappen..."
-        elif prozent >= 20:
-            emoji, text = "💔", "Eher nicht..."
-        else:
-            emoji, text = "😬", "Keine Chance!"
-
-        balken = "❤️" * (prozent // 10) + "🖤" * (10 - prozent // 10)
-        embed = discord.Embed(title=f"💘 Ship-O-Meter", description=f"**{u1.display_name}** & **{u2.display_name}**\n\n{balken}\n\n**{prozent}%** {emoji}\n*{text}*", color=0xFF6B9D)
-        await message.reply(embed=embed)
-
-    # ════════════════════════════════════════════════════════
-    # 🎉 SERVER-FUNKTIONEN (Willkommen, Giveaway)
-    # ════════════════════════════════════════════════════════
-
-    # ─── !willkommen Befehl ──────────────────────────────────
-    elif inhalt.startswith("!willkommen"):
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
-        else:
-            teile = inhalt.split(" ", 1)
-            if len(teile) > 1 and teile[1] == "aus":
-                willkommen_kanal.pop(str(message.guild.id), None)
-                await message.reply(embed=discord.Embed(description="✅ Willkommensnachrichten deaktiviert!", color=FARBE_ERFOLG))
-            else:
-                willkommen_kanal[str(message.guild.id)] = message.channel.id
-                await message.reply(embed=discord.Embed(description=f"✅ Willkommensnachrichten in {message.channel.mention} aktiviert!\nNeue Mitglieder werden hier begrüßt.", color=FARBE_ERFOLG))
-
-    # ─── !giveaway Befehl ────────────────────────────────────
-    elif inhalt.startswith("!giveaway "):
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
-        else:
-            teile = inhalt.split(" ", 2)
-            if len(teile) < 3:
-                await message.reply(embed=fehler_embed("Nutze: `!giveaway [zeit] [preis]`\nz.B. `!giveaway 1m Nitro`"))
-            else:
-                sekunden = parse_zeit(teile[1])
-                preis = teile[2]
-                if sekunden is None:
-                    await message.reply(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `1h`"))
-                else:
-                    embed = discord.Embed(title="🎉 GIVEAWAY!", description=f"**Preis:** {preis}\n\n**Zeit:** {teile[1]}\n\nReagiere mit 🎉 um teilzunehmen!", color=0xF1C40F)
-                    embed.set_footer(text=f"Veranstaltet von {user_name}")
-                    giveaway_msg = await message.channel.send(embed=embed)
-                    await giveaway_msg.add_reaction("🎉")
-                    await message.delete()
-                    await asyncio.sleep(sekunden)
-                    giveaway_msg = await message.channel.fetch_message(giveaway_msg.id)
-                    reaktion = discord.utils.get(giveaway_msg.reactions, emoji="🎉")
-                    teilnehmer = [u async for u in reaktion.users() if not u.bot]
-                    if teilnehmer:
-                        gewinner = random.choice(teilnehmer)
-                        ende_embed = discord.Embed(title="🎉 Giveaway beendet!", description=f"**Preis:** {preis}\n**Gewinner:** {gewinner.mention} 🎊", color=FARBE_ERFOLG)
-                        await message.channel.send(content=gewinner.mention, embed=ende_embed)
-                    else:
-                        await message.channel.send(embed=discord.Embed(description="😢 Keine Teilnehmer beim Giveaway!", color=FARBE_FEHLER))
-
-    # ─── !reset Befehl ─────────────────────────────────────
+    # ── !reset ────────────────────────────────────────────
     elif inhalt == "!reset":
         chat_verlaeufe[user_id] = []
-        await message.reply(embed=discord.Embed(description="🗑️ Dein Chat Verlauf wurde gelöscht!", color=FARBE_ERFOLG))
+        await message.reply(embed=discord.Embed(description="🗑️ Chat Verlauf gelöscht!", color=FARBE_ERFOLG))
 
-    # ─── !hilfe Befehl ─────────────────────────────────────
+    # ── !hilfe ────────────────────────────────────────────
     elif inhalt == "!hilfe":
-        embed = discord.Embed(
-            title="🤖 Bot Befehle",
-            description="Hier sind alle verfügbaren Befehle, übersichtlich sortiert:",
-            color=FARBE_KI
-        )
+        embed = discord.Embed(title="🤖 Bot Befehle", description="Alle verfügbaren Befehle:", color=FARBE_KI)
         embed.set_thumbnail(url=bot.user.display_avatar.url)
-        embed.add_field(name="🗣️ KI & Chat", value=(
-            "`!ki [frage]` — KI antwortet\n"
-            "`!persönlichkeit` — Charakter wechseln\n"
-            "`!reset` — Verlauf löschen"
-        ), inline=False)
-        embed.add_field(name="🧠 Gedächtnis", value=(
-            "`!merke [info]` · `!merkliste` · `!vergiss`"
-        ), inline=False)
-        embed.add_field(name="✍️ Text & Kreativ", value=(
-            "`!übersetzen [text]` · `!zusammenfassen [text]`\n"
-            "`!geschichte [thema]` · `!reim [thema]`"
-        ), inline=False)
-        embed.add_field(name="🎮 Spaß & Spiele", value=(
-            "`!witz` · `!zitat` · `!fakt` · `!kompliment`\n"
-            "`!würfel [seiten]` · `!münze` · `!rate [max]`\n"
-            "`!ssp [schere/stein/papier]` · `!rechne [rechnung]`\n"
-            "`!ttt` — Tic-Tac-Toe · `!hangman` — Galgenmännchen\n"
-            "`!quiz` — Allgemeinwissen-Quiz"
-        ), inline=False)
-        embed.add_field(name="🛠️ Tools", value=(
-            "`!avatar [@user]` · `!passwort [länge]`\n"
-            "`!umrechnen [zahl] [von] [zu]` · `!ship @user [@user2]`\n"
-            "`!umfrage [frage]` · `!erinnere [zeit] [text]`\n"
-            "`!todo add/liste/done/clear`"
-        ), inline=False)
-        embed.add_field(name="🎉 Server", value=(
-            "`!willkommen` / `!willkommen aus` — Begrüßungskanal\n"
-            "`!giveaway [zeit] [preis]` — Gewinnspiel starten"
-        ), inline=False)
-        embed.add_field(name="⭐ Level", value=(
-            "`!level` · `!rangliste`"
-        ), inline=False)
-        embed.add_field(name="🛡️ Moderation (braucht Rechte)", value=(
-            "`!clear [n]` · `!kick @user [grund]` · `!ban @user [grund]`\n"
-            "`!unban [name/id]` · `!mute @user [zeit]` · `!unmute @user`\n"
-            "`!warn @user [grund]` · `!warnungen [@user]` · `!entwarnen @user`\n"
-            "`!lock` · `!unlock` · `!slowmode [sek]` · `!ankündigung [text]`"
-        ), inline=False)
-        embed.add_field(name="ℹ️ Info", value=(
-            "`!userinfo [@user]` · `!serverinfo` · `!ping`\n"
-            "`!uptime` · `!avatar [@user]`"
-        ), inline=False)
-        embed.add_field(name="⚙️ Server-Einstellungen (braucht Rechte)", value=(
-            "`!setwelcome #kanal [text]` · `!removewelcome`\n"
-            "`!autorole @rolle` · `!removeautorole`"
-        ), inline=False)
+        embed.add_field(name="🗣️ KI & Chat", value="`!ki [frage]` · `!persönlichkeit` · `!reset`", inline=False)
+        embed.add_field(name="🧠 Gedächtnis", value="`!merke [info]` · `!merkliste` · `!vergiss`", inline=False)
+        embed.add_field(name="✍️ Text & Kreativ", value="`!übersetzen` · `!zusammenfassen` · `!geschichte` · `!reim` · `!witz` · `!zitat` · `!fakt` · `!kompliment`", inline=False)
+        embed.add_field(name="🎮 Spiele", value="`!hangman` · `!quiz` · `!ttt @user` · `!rate` · `!ssp` · `!würfel` · `!münze` · `!ship`", inline=False)
+        embed.add_field(name="🛠️ Tools", value="`!rechne` · `!avatar` · `!passwort` · `!umrechnen` · `!umfrage` · `!erinnere` · `!todo` · `!ping` · `!uptime`", inline=False)
+        embed.add_field(name="🎉 Server", value="`!willkommen` · `!giveaway [zeit] [preis]`", inline=False)
+        embed.add_field(name="⭐ Level", value="`!level` · `!rangliste`", inline=False)
+        embed.add_field(name="🛡️ Mod (braucht Rechte)", value="`!clear` · `!kick` · `!ban` · `!mute` · `!unmute` · `!warn` · `!warnungen` · `!entwarnen` · `!lock` · `!unlock` · `!slowmode` · `!ankündigung` · `!userinfo` · `!serverinfo`", inline=False)
         embed.set_footer(text=f"Angefordert von {user_name}", icon_url=avatar_url)
         await message.reply(embed=embed)
 
-
-# ════════════════════════════════════════════════════════════
-# ⚡ SLASH-BEFEHLE (/...)
-# Funktionieren genauso wie die !-Befehle, aber mit Discords
-# eingebautem Auswahlmenü und Beschreibungen!
-# ════════════════════════════════════════════════════════════
-
-# ─── /hilfe ──────────────────────────────────────────────────
-@tree.command(name="hilfe", description="Zeigt alle Befehle des Bots übersichtlich an")
-async def slash_hilfe(interaction: discord.Interaction):
-    embed = bau_hilfe_embed(interaction.user)
-    await interaction.response.send_message(embed=embed)
-
-# ─── /ki ─────────────────────────────────────────────────────
-@tree.command(name="ki", description="Stelle der KI eine Frage")
-@app_commands.describe(frage="Was möchtest du die KI fragen?")
-async def slash_ki(interaction: discord.Interaction, frage: str):
-    await interaction.response.defer()
-    user_id = str(interaction.user.id)
-    try:
-        if user_id not in chat_verlaeufe:
-            chat_verlaeufe[user_id] = []
-        chat_verlaeufe[user_id].append({"role": "user", "content": frage})
-        if len(chat_verlaeufe[user_id]) > 20:
-            chat_verlaeufe[user_id] = chat_verlaeufe[user_id][-20:]
-
-        persona_key = persoenlichkeit.get(user_id, "standard")
-        system_text = PERSONAS[persona_key]
-        p_info = PERSONA_INFO[persona_key]
-        if user_id in merkliste and merkliste[user_id]:
-            system_text += f" Wichtige Infos über den User: {'; '.join(merkliste[user_id])}."
-
-        messages = [{"role": "system", "content": system_text}] + chat_verlaeufe[user_id]
-        antwort_text = await groq_anfrage(messages)
-        chat_verlaeufe[user_id].append({"role": "assistant", "content": antwort_text})
-        if len(antwort_text) > 4000:
-            antwort_text = antwort_text[:3997] + "..."
-
-        aufgestiegen = xp_geben(user_id, 5)
-        embed = discord.Embed(description=antwort_text, color=p_info["farbe"])
-        embed.set_author(name=f"{p_info['emoji']} {p_info['name']}", icon_url=bot.user.display_avatar.url)
-        embed.set_footer(text=f"Gefragt von {interaction.user.display_name} · +5 XP" + (" · 🎉 LEVEL UP!" if aufgestiegen else ""), icon_url=interaction.user.display_avatar.url)
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-# ─── /persönlichkeit ─────────────────────────────────────────
-@tree.command(name="persönlichkeit", description="Wechsle den Charakter der KI")
-@app_commands.describe(charakter="Welcher Charakter soll die KI haben?")
-@app_commands.choices(charakter=[
-    app_commands.Choice(name="🧑‍⚖️ Anwalt", value="anwalt"),
-    app_commands.Choice(name="👧 Mädel", value="mädel"),
-    app_commands.Choice(name="👨‍🏫 Lehrer", value="lehrer"),
-    app_commands.Choice(name="🏴‍☠️ Pirat", value="pirat"),
-    app_commands.Choice(name="🤖 Standard", value="standard"),
-])
-async def slash_persona(interaction: discord.Interaction, charakter: app_commands.Choice[str]):
-    user_id = str(interaction.user.id)
-    wahl = charakter.value
-    persoenlichkeit[user_id] = wahl
-    p_info = PERSONA_INFO[wahl]
-    begruessungen = {
-        "anwalt": "Wie kann ich Ihnen behilflich sein?",
-        "mädel": "Heyyy, na was geht ab? 😊✨",
-        "lehrer": "Guten Tag! Womit kann ich dir heute helfen?",
-        "pirat": "Arrr! Bereit für ein Abenteuer, Landratte?",
-        "standard": "Zurück zum Standard-Modus!"
-    }
-    embed = discord.Embed(title=f"{p_info['emoji']} Persönlichkeit gewechselt", description=f"**{p_info['name']}**\n\n*{begruessungen[wahl]}*", color=p_info['farbe'])
-    await interaction.response.send_message(embed=embed)
-
-# ─── /würfel ─────────────────────────────────────────────────
-@tree.command(name="würfel", description="Wirf einen Würfel")
-@app_commands.describe(seiten="Wie viele Seiten soll der Würfel haben? (Standard: 6)")
-async def slash_wuerfel(interaction: discord.Interaction, seiten: int = 6):
-    if seiten < 2 or seiten > 1000:
-        await interaction.response.send_message(embed=fehler_embed("Bitte 2-1000 Seiten!"))
-        return
-    ergebnis = random.randint(1, seiten)
-    embed = discord.Embed(title="🎲 Würfelwurf", description=f"# {ergebnis}\n(1-{seiten})", color=FARBE_SPIEL)
-    await interaction.response.send_message(embed=embed)
-
-# ─── /münze ──────────────────────────────────────────────────
-@tree.command(name="münze", description="Wirf eine Münze (Kopf oder Zahl)")
-async def slash_muenze(interaction: discord.Interaction):
-    ergebnis = random.choice(["Kopf", "Zahl"])
-    emoji = "👑" if ergebnis == "Kopf" else "🔢"
-    embed = discord.Embed(title="🪙 Münzwurf", description=f"## {emoji} {ergebnis}", color=FARBE_SPIEL)
-    await interaction.response.send_message(embed=embed)
-
-# ─── /rechne ─────────────────────────────────────────────────
-@tree.command(name="rechne", description="Taschenrechner - berechnet einen mathematischen Ausdruck")
-@app_commands.describe(rechnung="z.B. 5*3+2")
-async def slash_rechne(interaction: discord.Interaction, rechnung: str):
-    try:
-        erlaubt = set("0123456789+-*/(). ")
-        if all(c in erlaubt for c in rechnung):
-            ergebnis = eval(rechnung)
-            embed = discord.Embed(title="🧮 Taschenrechner", color=FARBE_TOOL)
-            embed.add_field(name="Rechnung", value=f"`{rechnung}`", inline=True)
-            embed.add_field(name="Ergebnis", value=f"**{ergebnis}**", inline=True)
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.response.send_message(embed=fehler_embed("Nur Zahlen und + - * / ( ) erlaubt!"))
-    except Exception:
-        await interaction.response.send_message(embed=fehler_embed("Das konnte ich nicht berechnen!"))
-
-# ─── /witz, /zitat, /fakt, /kompliment (KI-Befehle ohne Argument) ──
-@tree.command(name="witz", description="Erzählt einen lustigen Witz")
-async def slash_witz(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Erzähle einen kurzen, lustigen Witz auf Deutsch. Nur den Witz, keine Einleitung."}, {"role": "user", "content": "Erzähl mir einen Witz"}]
-        text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=200)
-        await interaction.followup.send(embed=discord.Embed(title="😂 Witz des Tages", description=text, color=FARBE_SPIEL))
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="zitat", description="Gibt ein motivierendes Zitat aus")
-async def slash_zitat(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Gib ein kurzes, motivierendes Zitat auf Deutsch aus. Nenne auch einen Autor. Format: 'Zitat' - Autor"}, {"role": "user", "content": "Gib mir ein Zitat"}]
-        text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=150)
-        await interaction.followup.send(embed=discord.Embed(title="💬 Zitat des Tages", description=f"*{text}*", color=0xF39C12))
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="fakt", description="Gibt einen interessanten Fakt aus")
-async def slash_fakt(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Gib einen kurzen, interessanten und überraschenden Fakt auf Deutsch aus. Nur den Fakt."}, {"role": "user", "content": "Gib mir einen Fakt"}]
-        text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=150)
-        await interaction.followup.send(embed=discord.Embed(title="💡 Wusstest du schon?", description=text, color=0x1ABC9C))
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="kompliment", description="Der Bot macht dir ein Kompliment")
-async def slash_kompliment(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": f"Gib ein kurzes, herzliches und kreatives Kompliment auf Deutsch an {interaction.user.display_name}. Nur das Kompliment."}, {"role": "user", "content": "Gib mir ein Kompliment"}]
-        text = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=100)
-        embed = discord.Embed(description=f"💖 {text}", color=0xFF6B9D)
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-# ─── /übersetzen, /zusammenfassen, /geschichte, /reim ─────────
-@tree.command(name="übersetzen", description="Übersetzt einen Text ins Englische")
-@app_commands.describe(text="Der zu übersetzende Text")
-async def slash_uebersetzen(interaction: discord.Interaction, text: str):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Du bist ein Übersetzer. Antworte NUR mit der Übersetzung auf Englisch."}, {"role": "user", "content": text}]
-        antwort = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
-        embed = discord.Embed(title="🌍 Übersetzung", color=FARBE_TOOL)
-        embed.add_field(name="Original (DE)", value=text, inline=False)
-        embed.add_field(name="Englisch", value=antwort, inline=False)
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="zusammenfassen", description="Fasst einen Text kurz zusammen")
-@app_commands.describe(text="Der zusammenzufassende Text")
-async def slash_zusammenfassen(interaction: discord.Interaction, text: str):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Du fasst Texte kurz und präzise zusammen."}, {"role": "user", "content": text}]
-        antwort = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=500)
-        await interaction.followup.send(embed=discord.Embed(title="📝 Zusammenfassung", description=antwort, color=FARBE_TOOL))
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="geschichte", description="Schreibt eine kurze Geschichte zu einem Thema")
-@app_commands.describe(thema="Worüber soll die Geschichte handeln?")
-async def slash_geschichte(interaction: discord.Interaction, thema: str):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Schreibe eine kurze, kreative Geschichte (max 150 Wörter) auf Deutsch zum gegebenen Thema."}, {"role": "user", "content": thema}]
-        antwort = await groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=400)
-        embed = discord.Embed(title=f"📖 {thema}", description=antwort, color=0x8E44AD)
-        embed.set_footer(text="✨ KI-generierte Geschichte")
-        await interaction.followup.send(embed=embed)
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-@tree.command(name="reim", description="Schreibt einen kurzen Reim zu einem Thema")
-@app_commands.describe(thema="Worüber soll der Reim handeln?")
-async def slash_reim(interaction: discord.Interaction, thema: str):
-    await interaction.response.defer()
-    try:
-        messages = [{"role": "system", "content": "Schreibe ein kurzes, lustiges 4-zeiliges Gedicht/Reim auf Deutsch zum gegebenen Thema."}, {"role": "user", "content": thema}]
-        antwort = await groq_anfrage(messages, modell="llama-3.1-8b-instant", max_tokens=200)
-        await interaction.followup.send(embed=discord.Embed(title=f"🎤 Reim: {thema}", description=antwort, color=0x8E44AD))
-    except Exception as e:
-        await interaction.followup.send(embed=fehler_embed(f"Fehler: {repr(e)}"))
-
-# ─── /level, /rangliste ────────────────────────────────────────
-@tree.command(name="level", description="Zeigt dein aktuelles Level und XP")
-async def slash_level(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    daten = levels.get(user_id, {"xp": 0, "level": 1})
-    benoetigt = daten["level"] * 100
-    balken_voll = int((daten["xp"] / benoetigt) * 10)
-    balken = "🟩" * balken_voll + "⬜" * (10 - balken_voll)
-    embed = discord.Embed(title=f"⭐ Level von {interaction.user.display_name}", color=0xF1C40F)
-    embed.set_thumbnail(url=interaction.user.display_avatar.url)
-    embed.add_field(name="Level", value=f"**{daten['level']}**", inline=True)
-    embed.add_field(name="XP", value=f"{daten['xp']}/{benoetigt}", inline=True)
-    embed.add_field(name="Fortschritt", value=balken, inline=False)
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="rangliste", description="Zeigt die Top 10 Level-Rangliste")
-async def slash_rangliste(interaction: discord.Interaction):
-    if not levels:
-        await interaction.response.send_message(embed=discord.Embed(description="📊 Noch keine Daten vorhanden!", color=FARBE_INFO))
-        return
-    sortiert = sorted(levels.items(), key=lambda x: (x[1]["level"], x[1]["xp"]), reverse=True)[:10]
-    text = ""
-    medaillen = ["🥇", "🥈", "🥉"]
-    for i, (uid, daten) in enumerate(sortiert):
-        try:
-            user = await bot.fetch_user(int(uid))
-            name = user.display_name
-        except Exception:
-            name = f"User {uid}"
-        rang = medaillen[i] if i < 3 else f"**{i+1}.**"
-        text += f"{rang} {name} — Level **{daten['level']}** ({daten['xp']} XP)\n"
-    await interaction.response.send_message(embed=discord.Embed(title="🏆 Rangliste", description=text, color=0xF1C40F))
-
-# ─── /ping, /uptime, /avatar ─────────────────────────────────
-@tree.command(name="ping", description="Zeigt die Bot-Latenz an")
-async def slash_ping(interaction: discord.Interaction):
-    latenz = round(bot.latency * 1000)
-    embed = discord.Embed(title="🏓 Pong!", description=f"Latenz: **{latenz}ms**", color=FARBE_ERFOLG if latenz < 200 else FARBE_SPIEL)
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="uptime", description="Zeigt wie lange der Bot schon läuft")
-async def slash_uptime(interaction: discord.Interaction):
-    delta = datetime.now(timezone.utc) - BOT_START
-    tage, rest = divmod(int(delta.total_seconds()), 86400)
-    stunden, rest = divmod(rest, 3600)
-    minuten, sekunden = divmod(rest, 60)
-    text = f"{tage}d {stunden}h {minuten}m {sekunden}s"
-    await interaction.response.send_message(embed=discord.Embed(title="⏱️ Bot Uptime", description=f"Online seit: **{text}**", color=FARBE_INFO))
-
-@tree.command(name="avatar", description="Zeigt das Profilbild groß an")
-@app_commands.describe(user="Von wem soll das Profilbild gezeigt werden? (leer = du selbst)")
-async def slash_avatar(interaction: discord.Interaction, user: discord.Member = None):
-    ziel = user or interaction.user
-    embed = discord.Embed(title=f"🖼️ Avatar von {ziel.display_name}", color=FARBE_INFO)
-    embed.set_image(url=ziel.display_avatar.url)
-    await interaction.response.send_message(embed=embed)
-
-# ─── /userinfo, /serverinfo ───────────────────────────────────
-@tree.command(name="userinfo", description="Zeigt Informationen über ein Mitglied")
-@app_commands.describe(user="Über wen sollen Infos gezeigt werden? (leer = du selbst)")
-async def slash_userinfo(interaction: discord.Interaction, user: discord.Member = None):
-    ziel = user or interaction.user
-    embed = discord.Embed(title=f"👤 {ziel.display_name}", color=ziel.color if ziel.color.value != 0 else FARBE_INFO)
-    embed.set_thumbnail(url=ziel.display_avatar.url)
-    embed.add_field(name="Name", value=str(ziel), inline=True)
-    embed.add_field(name="ID", value=ziel.id, inline=True)
-    embed.add_field(name="Konto erstellt", value=ziel.created_at.strftime("%d.%m.%Y"), inline=True)
-    if ziel.joined_at:
-        embed.add_field(name="Server beigetreten", value=ziel.joined_at.strftime("%d.%m.%Y"), inline=True)
-    rollen = ", ".join(r.mention for r in ziel.roles if r.name != "@everyone")
-    embed.add_field(name="Rollen", value=rollen if rollen else "Keine", inline=False)
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="serverinfo", description="Zeigt Informationen über diesen Server")
-async def slash_serverinfo(interaction: discord.Interaction):
-    guild = interaction.guild
-    embed = discord.Embed(title=f"🏠 {guild.name}", color=FARBE_INFO)
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-    embed.add_field(name="Mitglieder", value=guild.member_count, inline=True)
-    embed.add_field(name="Erstellt am", value=guild.created_at.strftime("%d.%m.%Y"), inline=True)
-    embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unbekannt", inline=True)
-    embed.add_field(name="Kanäle", value=len(guild.channels), inline=True)
-    embed.add_field(name="Rollen", value=len(guild.roles), inline=True)
-    embed.add_field(name="Server ID", value=guild.id, inline=True)
-    await interaction.response.send_message(embed=embed)
-
-# ════════════════════════════════════════════════════════════
-# 🛡️ SLASH MODERATIONS-BEFEHLE
-# ════════════════════════════════════════════════════════════
-
-@tree.command(name="kick", description="Kickt ein Mitglied vom Server")
-@app_commands.describe(user="Wer soll gekickt werden?", grund="Warum wird gekickt?")
-async def slash_kick(interaction: discord.Interaction, user: discord.Member, grund: str = "Kein Grund angegeben"):
-    if not interaction.user.guild_permissions.kick_members:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken**!"), ephemeral=True)
-        return
-    if user.guild_permissions.administrator:
-        await interaction.response.send_message(embed=fehler_embed("Du kannst keinen Administrator kicken!"), ephemeral=True)
-        return
-    try:
-        await user.kick(reason=f"{grund} (von {interaction.user.display_name})")
-        embed = discord.Embed(title="👋 Mitglied gekickt", color=FARBE_ERFOLG)
-        embed.add_field(name="User", value=user.mention, inline=True)
-        embed.add_field(name="Von", value=interaction.user.mention, inline=True)
-        embed.add_field(name="Grund", value=grund, inline=False)
-        await interaction.response.send_message(embed=embed)
-    except discord.Forbidden:
-        await interaction.response.send_message(embed=fehler_embed("Ich habe keine Berechtigung! (Rolle zu hoch?)"), ephemeral=True)
-
-@tree.command(name="ban", description="Bannt ein Mitglied vom Server")
-@app_commands.describe(user="Wer soll gebannt werden?", grund="Warum wird gebannt?")
-async def slash_ban(interaction: discord.Interaction, user: discord.Member, grund: str = "Kein Grund angegeben"):
-    if not interaction.user.guild_permissions.ban_members:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder bannen**!"), ephemeral=True)
-        return
-    if user.guild_permissions.administrator:
-        await interaction.response.send_message(embed=fehler_embed("Du kannst keinen Administrator bannen!"), ephemeral=True)
-        return
-    try:
-        await user.ban(reason=f"{grund} (von {interaction.user.display_name})")
-        embed = discord.Embed(title="🔨 Mitglied gebannt", color=FARBE_FEHLER)
-        embed.add_field(name="User", value=f"{user.mention} ({user})", inline=True)
-        embed.add_field(name="Von", value=interaction.user.mention, inline=True)
-        embed.add_field(name="Grund", value=grund, inline=False)
-        await interaction.response.send_message(embed=embed)
-    except discord.Forbidden:
-        await interaction.response.send_message(embed=fehler_embed("Ich habe keine Berechtigung! (Rolle zu hoch?)"), ephemeral=True)
-
-@tree.command(name="mute", description="Mutet ein Mitglied für eine bestimmte Zeit (Timeout)")
-@app_commands.describe(user="Wer soll gemutet werden?", zeit="z.B. 10m, 1h, 30s", grund="Warum wird gemutet?")
-async def slash_mute(interaction: discord.Interaction, user: discord.Member, zeit: str = "10m", grund: str = "Kein Grund angegeben"):
-    if not interaction.user.guild_permissions.moderate_members:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout**!"), ephemeral=True)
-        return
-    sekunden = parse_zeit(zeit)
-    if sekunden is None:
-        await interaction.response.send_message(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `1h`, `30s`"), ephemeral=True)
-        return
-    if sekunden > 2419200:
-        await interaction.response.send_message(embed=fehler_embed("Maximal 28 Tage Timeout möglich!"), ephemeral=True)
-        return
-    if user.guild_permissions.administrator:
-        await interaction.response.send_message(embed=fehler_embed("Du kannst keinen Administrator muten!"), ephemeral=True)
-        return
-    try:
-        await user.timeout(timedelta(seconds=sekunden), reason=f"{grund} (von {interaction.user.display_name})")
-        embed = discord.Embed(title="🔇 Mitglied gemutet", color=FARBE_SPIEL)
-        embed.add_field(name="User", value=user.mention, inline=True)
-        embed.add_field(name="Dauer", value=zeit, inline=True)
-        embed.add_field(name="Grund", value=grund, inline=False)
-        await interaction.response.send_message(embed=embed)
-    except discord.Forbidden:
-        await interaction.response.send_message(embed=fehler_embed("Ich habe keine Berechtigung! (Rolle zu hoch?)"), ephemeral=True)
-
-@tree.command(name="unmute", description="Hebt den Timeout eines Mitglieds auf")
-@app_commands.describe(user="Wer soll entmutet werden?")
-async def slash_unmute(interaction: discord.Interaction, user: discord.Member):
-    if not interaction.user.guild_permissions.moderate_members:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder timeout**!"), ephemeral=True)
-        return
-    try:
-        await user.timeout(None)
-        await interaction.response.send_message(embed=discord.Embed(description=f"🔊 {user.mention} wurde entmutet!", color=FARBE_ERFOLG))
-    except discord.Forbidden:
-        await interaction.response.send_message(embed=fehler_embed("Ich habe keine Berechtigung!"), ephemeral=True)
-
-@tree.command(name="warn", description="Verwarnt ein Mitglied")
-@app_commands.describe(user="Wer soll verwarnt werden?", grund="Warum wird verwarnt?")
-async def slash_warn(interaction: discord.Interaction, user: discord.Member, grund: str = "Kein Grund angegeben"):
-    if not interaction.user.guild_permissions.kick_members:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Mitglieder kicken** um zu verwarnen!"), ephemeral=True)
-        return
-    ziel_id = str(user.id)
-    if ziel_id not in warnungen:
-        warnungen[ziel_id] = []
-    warnungen[ziel_id].append({"grund": grund, "von": interaction.user.display_name})
-    anzahl = len(warnungen[ziel_id])
-    embed = discord.Embed(title="⚠️ Verwarnung erteilt", color=FARBE_SPIEL)
-    embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Anzahl Verwarnungen", value=f"**{anzahl}**", inline=True)
-    embed.add_field(name="Grund", value=grund, inline=False)
-    if anzahl >= 3:
-        embed.add_field(name="⚠️ Achtung", value="Dieser User hat **3 oder mehr** Verwarnungen!", inline=False)
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="clear", description="Löscht eine Anzahl Nachrichten in diesem Kanal")
-@app_commands.describe(anzahl="Wie viele Nachrichten sollen gelöscht werden? (1-100)")
-async def slash_clear(interaction: discord.Interaction, anzahl: int):
-    if not interaction.user.guild_permissions.manage_messages:
-        await interaction.response.send_message(embed=fehler_embed("Du brauchst die Berechtigung **Nachrichten verwalten**!"), ephemeral=True)
-        return
-    if anzahl < 1 or anzahl > 100:
-        await interaction.response.send_message(embed=fehler_embed("Bitte eine Zahl zwischen 1 und 100!"), ephemeral=True)
-        return
-    try:
-        deleted = await interaction.channel.purge(limit=anzahl)
-        await interaction.response.send_message(embed=discord.Embed(description=f"🧹 **{len(deleted)}** Nachrichten gelöscht!", color=FARBE_ERFOLG), ephemeral=True)
-    except discord.Forbidden:
-        await interaction.response.send_message(embed=fehler_embed("Mir fehlt die Berechtigung **Nachrichten verwalten**!"), ephemeral=True)
+bot.run(DISCORD_TOKEN)
