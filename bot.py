@@ -4,7 +4,7 @@ import aiohttp
 import os
 import random
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -67,7 +67,7 @@ server_config = {}       # Welcome/Autorole Einstellungen pro Server
 ttt_spiele = {}          # Tic-Tac-Toe pro Channel
 hangman_spiele = {}      # Galgenmännchen pro Channel
 quiz_aktiv = {}          # Aktives Quiz pro Channel
-BOT_START = datetime.utcnow()
+BOT_START = datetime.now(timezone.utc)
 
 HANGMAN_WOERTER = ["PYTHON", "DISCORD", "COMPUTER", "TASTATUR", "BILDSCHIRM", "INTERNET", "PROGRAMM", "ROBOTER", "GALAXIE", "FUSSBALL", "PIZZA", "GITARRE", "ELEFANT", "REGENBOGEN", "ASTRONAUT"]
 
@@ -892,7 +892,6 @@ async def on_message(message):
                 await message.reply(embed=fehler_embed("Du kannst keinen Administrator muten!"))
             else:
                 try:
-                    from datetime import timedelta
                     await ziel.timeout(timedelta(seconds=sekunden), reason=f"{grund} (von {user_name})")
                     embed = discord.Embed(title="🔇 Mitglied gemutet", color=FARBE_SPIEL)
                     embed.add_field(name="User", value=ziel.mention, inline=True)
@@ -1017,7 +1016,7 @@ async def on_message(message):
             text = inhalt[13:]
             embed = discord.Embed(title="📢 Ankündigung", description=text, color=0xE74C3C)
             embed.set_footer(text=f"Von {user_name}", icon_url=avatar_url)
-            embed.timestamp = datetime.utcnow()
+            embed.timestamp = datetime.now(timezone.utc)
             await message.delete()
             await message.channel.send(content="@everyone", embed=embed)
 
@@ -1157,7 +1156,7 @@ async def on_message(message):
 
     # ─── !uptime Befehl ──────────────────────────────────────
     elif inhalt == "!uptime":
-        delta = datetime.utcnow() - BOT_START
+        delta = datetime.now(timezone.utc) - BOT_START
         tage, rest = divmod(int(delta.total_seconds()), 86400)
         stunden, rest = divmod(rest, 3600)
         minuten, sekunden = divmod(rest, 60)
@@ -1762,7 +1761,7 @@ async def slash_ping(interaction: discord.Interaction):
 
 @tree.command(name="uptime", description="Zeigt wie lange der Bot schon läuft")
 async def slash_uptime(interaction: discord.Interaction):
-    delta = datetime.utcnow() - BOT_START
+    delta = datetime.now(timezone.utc) - BOT_START
     tage, rest = divmod(int(delta.total_seconds()), 86400)
     stunden, rest = divmod(rest, 3600)
     minuten, sekunden = divmod(rest, 60)
