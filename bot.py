@@ -26,6 +26,43 @@ levels = {}
 rate_spiel = {}
 todo_listen = {}
 warnungen = {}           # Verwarnungen pro User
+hangman_spiele = {}      # Laufende Hangman Spiele
+giveaways = {}           # Laufende Giveaways
+quiz_spiele = {}         # Laufende Quiz Spiele
+tictactoe_spiele = {}    # Laufende TicTacToe Spiele
+willkommen_kanal = {}    # Willkommens-Kanal pro Server
+auto_rollen = {}         # Auto-Rollen pro Server
+
+# ─── Hangman Wörter ────────────────────────────────────────
+HANGMAN_WOERTER = [
+    "python", "discord", "programmieren", "computer", "tastatur",
+    "internet", "datenbank", "algorithmus", "software", "hardware",
+    "entwickler", "passwort", "netzwerk", "server", "browser"
+]
+
+HANGMAN_BILDER = [
+    "```\n  +---+\n  |   |\n      |\n      |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n      |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n  |   |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|   |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n      |\n=========```",
+    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n      |\n=========```"
+]
+
+# ─── Quiz Fragen ───────────────────────────────────────────
+QUIZ_FRAGEN = [
+    {"frage": "Was ist die Hauptstadt von Deutschland?", "antworten": ["A) München", "B) Berlin", "C) Hamburg", "D) Frankfurt"], "richtig": "B"},
+    {"frage": "Wie viele Planeten hat unser Sonnensystem?", "antworten": ["A) 7", "B) 9", "C) 8", "D) 10"], "richtig": "C"},
+    {"frage": "In welchem Jahr wurde das Internet erfunden?", "antworten": ["A) 1969", "B) 1995", "C) 1983", "D) 1991"], "richtig": "A"},
+    {"frage": "Was ist die schnellste Programmiersprache?", "antworten": ["A) Python", "B) Java", "C) C", "D) JavaScript"], "richtig": "C"},
+    {"frage": "Wie viele Bits hat ein Byte?", "antworten": ["A) 4", "B) 16", "C) 8", "D) 32"], "richtig": "C"},
+    {"frage": "Welches Tier ist das größte der Welt?", "antworten": ["A) Elefant", "B) Blauwal", "C) Hai", "D) Giraffe"], "richtig": "B"},
+    {"frage": "Wie viele Kontinente hat die Erde?", "antworten": ["A) 5", "B) 6", "C) 7", "D) 8"], "richtig": "C"},
+    {"frage": "Was ist H2O?", "antworten": ["A) Salz", "B) Sauerstoff", "C) Wasser", "D) Wasserstoff"], "richtig": "C"},
+    {"frage": "Wer hat die Relativitätstheorie entwickelt?", "antworten": ["A) Newton", "B) Einstein", "C) Hawking", "D) Tesla"], "richtig": "B"},
+    {"frage": "Wie viele Sekunden hat eine Stunde?", "antworten": ["A) 3000", "B) 3200", "C) 3600", "D) 4000"], "richtig": "C"},
+]
 server_config = {}       # Welcome/Autorole Einstellungen pro Server
 ttt_spiele = {}          # Tic-Tac-Toe pro Channel
 hangman_spiele = {}      # Galgenmännchen pro Channel
@@ -226,6 +263,27 @@ def bau_hilfe_embed(user):
 
     embed.set_footer(text=f"Angefordert von {user.display_name}", icon_url=user.display_avatar.url)
     return embed
+
+@bot.event
+async def on_member_join(member):
+    guild_id = str(member.guild.id)
+    if guild_id in willkommen_kanal:
+        kanal = bot.get_channel(willkommen_kanal[guild_id])
+        if kanal:
+            embed = discord.Embed(
+                title=f"👋 Willkommen, {member.display_name}!",
+                description=f"Schön dass du auf **{member.guild.name}** bist!\nDu bist Mitglied **#{member.guild.member_count}**.",
+                color=FARBE_ERFOLG
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await kanal.send(content=member.mention, embed=embed)
+    if guild_id in auto_rollen:
+        rolle = member.guild.get_role(auto_rollen[guild_id])
+        if rolle:
+            try:
+                await member.add_roles(rolle)
+            except Exception:
+                pass
 
 @bot.event
 async def on_ready():
@@ -1118,6 +1176,288 @@ async def on_message(message):
     # ENDE NEUE FUNKTIONEN
     # ════════════════════════════════════════════════════════
 
+    # ════════════════════════════════════════════════════════
+    # 🎮 SPIELE (Hangman, Quiz, TicTacToe)
+    # ════════════════════════════════════════════════════════
+
+    # ─── !hangman Befehl ─────────────────────────────────────
+    elif inhalt == "!hangman":
+        wort = random.choice(HANGMAN_WOERTER)
+        hangman_spiele[user_id] = {"wort": wort, "geraten": [], "falsch": 0}
+        angezeigt = " ".join("_" if b not in [] else b for b in wort)
+        embed = discord.Embed(title="🎯 Hangman gestartet!", description=f"{HANGMAN_BILDER[0]}\n\n`{angezeigt}`\n\nSchreibe einen Buchstaben um zu raten!", color=FARBE_SPIEL)
+        embed.set_footer(text="Tipp: Schreib einfach einen Buchstaben in den Chat!")
+        await message.reply(embed=embed)
+
+    # ─── !hangman: Buchstabe raten ───────────────────────────
+    elif user_id in hangman_spiele and len(inhalt) == 1 and inhalt.isalpha():
+        spiel = hangman_spiele[user_id]
+        buchstabe = inhalt.lower()
+        if buchstabe in spiel["geraten"]:
+            await message.reply(embed=discord.Embed(description=f"❗ Du hast **{buchstabe}** schon versucht!", color=FARBE_SPIEL))
+        else:
+            spiel["geraten"].append(buchstabe)
+            if buchstabe not in spiel["wort"]:
+                spiel["falsch"] += 1
+
+            angezeigt = " ".join(b if b in spiel["geraten"] else "_" for b in spiel["wort"])
+            falsch_buchstaben = [b for b in spiel["geraten"] if b not in spiel["wort"]]
+
+            if "_" not in angezeigt:
+                del hangman_spiele[user_id]
+                xp_geben(user_id, 30)
+                embed = discord.Embed(title="🎉 Gewonnen!", description=f"Das Wort war: **{spiel['wort']}**\n+30 XP!", color=FARBE_ERFOLG)
+                await message.reply(embed=embed)
+            elif spiel["falsch"] >= 6:
+                del hangman_spiele[user_id]
+                embed = discord.Embed(title="💀 Verloren!", description=f"{HANGMAN_BILDER[6]}\n\nDas Wort war: **{spiel['wort']}**", color=FARBE_FEHLER)
+                await message.reply(embed=embed)
+            else:
+                embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[spiel['falsch']]}\n\n`{angezeigt}`", color=FARBE_SPIEL)
+                embed.add_field(name="Falsche Buchstaben", value=" ".join(falsch_buchstaben) if falsch_buchstaben else "Keine", inline=True)
+                embed.add_field(name="Versuche übrig", value=str(6 - spiel["falsch"]), inline=True)
+                await message.reply(embed=embed)
+
+    # ─── !quiz Befehl ────────────────────────────────────────
+    elif inhalt == "!quiz":
+        frage = random.choice(QUIZ_FRAGEN)
+        quiz_spiele[user_id] = {"richtig": frage["richtig"]}
+        embed = discord.Embed(title="🧠 Quiz", description=f"**{frage['frage']}**\n\n" + "\n".join(frage["antworten"]), color=FARBE_INFO)
+        embed.set_footer(text="Antworte mit A, B, C oder D!")
+        await message.reply(embed=embed)
+
+    # ─── !quiz Antwort ───────────────────────────────────────
+    elif user_id in quiz_spiele and inhalt.upper() in ["A", "B", "C", "D"]:
+        spiel = quiz_spiele.pop(user_id)
+        if inhalt.upper() == spiel["richtig"]:
+            xp_geben(user_id, 15)
+            await message.reply(embed=discord.Embed(description="✅ **Richtig!** +15 XP ⭐", color=FARBE_ERFOLG))
+        else:
+            await message.reply(embed=discord.Embed(description=f"❌ **Falsch!** Die richtige Antwort war **{spiel['richtig']}**", color=FARBE_FEHLER))
+
+    # ─── !ttt Befehl (TicTacToe) ─────────────────────────────
+    elif inhalt.startswith("!ttt "):
+        if not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!ttt @user`"))
+        else:
+            gegner = message.mentions[0]
+            if gegner == message.author:
+                await message.reply(embed=fehler_embed("Du kannst nicht gegen dich selbst spielen!"))
+            elif gegner.bot:
+                await message.reply(embed=fehler_embed("Du kannst nicht gegen einen Bot spielen!"))
+            else:
+                spiel_id = f"{user_id}-{gegner.id}"
+                tictactoe_spiele[spiel_id] = {
+                    "brett": [" "] * 9,
+                    "spieler": [message.author, gegner],
+                    "aktuell": 0,
+                    "zeichen": ["❌", "⭕"]
+                }
+                brett = tictactoe_spiele[spiel_id]["brett"]
+                brett_text = f"`1️⃣{brett[0]}|2️⃣{brett[1]}|3️⃣{brett[2]}`\n`4️⃣{brett[3]}|5️⃣{brett[4]}|6️⃣{brett[5]}`\n`7️⃣{brett[6]}|8️⃣{brett[7]}|9️⃣{brett[8]}`"
+                embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
+                embed.add_field(name="Spieler", value=f"❌ {message.author.mention}\n⭕ {gegner.mention}", inline=True)
+                embed.add_field(name="Am Zug", value=f"❌ {message.author.mention}", inline=True)
+                embed.set_footer(text="Schreibe eine Zahl (1-9) um zu spielen!")
+                await message.channel.send(embed=embed)
+
+    # ─── TicTacToe: Zug ─────────────────────────────────────
+    elif inhalt.strip().isdigit() and 1 <= int(inhalt.strip()) <= 9:
+        # Suche ob User in einem TicTacToe-Spiel ist
+        spiel_id = None
+        spiel = None
+        for sid, s in tictactoe_spiele.items():
+            if s["spieler"][s["aktuell"]].id == message.author.id:
+                spiel_id = sid
+                spiel = s
+                break
+
+        if spiel:
+            pos = int(inhalt.strip()) - 1
+            if spiel["brett"][pos] != " ":
+                await message.reply(embed=fehler_embed("Dieses Feld ist schon belegt!"))
+            else:
+                spiel["brett"][pos] = spiel["zeichen"][spiel["aktuell"]]
+                brett = spiel["brett"]
+
+                # Gewinn-Check
+                gewinn_kombinationen = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+                gewinner = None
+                for a, b, c in gewinn_kombinationen:
+                    if brett[a] == brett[b] == brett[c] != " ":
+                        gewinner = spiel["spieler"][spiel["aktuell"]]
+
+                brett_text = f"`{brett[0]}|{brett[1]}|{brett[2]}`\n`{brett[3]}|{brett[4]}|{brett[5]}`\n`{brett[6]}|{brett[7]}|{brett[8]}`"
+                brett_text = brett_text.replace(" ", "⬜")
+
+                if gewinner:
+                    del tictactoe_spiele[spiel_id]
+                    xp_geben(str(gewinner.id), 25)
+                    embed = discord.Embed(title=f"🎉 {gewinner.display_name} gewinnt!", description=brett_text, color=FARBE_ERFOLG)
+                    embed.add_field(name="Belohnung", value="+25 XP ⭐")
+                    await message.channel.send(embed=embed)
+                elif " " not in brett:
+                    del tictactoe_spiele[spiel_id]
+                    embed = discord.Embed(title="🤝 Unentschieden!", description=brett_text, color=FARBE_INFO)
+                    await message.channel.send(embed=embed)
+                else:
+                    spiel["aktuell"] = 1 - spiel["aktuell"]
+                    naechster = spiel["spieler"][spiel["aktuell"]]
+                    embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
+                    embed.add_field(name="Am Zug", value=f"{spiel['zeichen'][spiel['aktuell']]} {naechster.mention}")
+                    await message.channel.send(embed=embed)
+
+    # ════════════════════════════════════════════════════════
+    # 🛠️ TOOLS (Avatar, Passwort, Umrechnen, Countdown)
+    # ════════════════════════════════════════════════════════
+
+    # ─── !avatar Befehl ──────────────────────────────────────
+    elif inhalt.startswith("!avatar"):
+        ziel = message.mentions[0] if message.mentions else message.author
+        embed = discord.Embed(title=f"🖼️ Avatar von {ziel.display_name}", color=FARBE_INFO)
+        embed.set_image(url=ziel.display_avatar.url)
+        embed.add_field(name="Link", value=f"[Klick hier]({ziel.display_avatar.url})")
+        await message.reply(embed=embed)
+
+    # ─── !passwort Befehl ────────────────────────────────────
+    elif inhalt.startswith("!passwort"):
+        import string
+        teile = inhalt.split(" ")
+        laenge = int(teile[1]) if len(teile) > 1 and teile[1].isdigit() else 16
+        laenge = min(max(laenge, 8), 64)
+        zeichen = string.ascii_letters + string.digits + "!@#$%^&*"
+        passwort = "".join(random.choice(zeichen) for _ in range(laenge))
+        embed = discord.Embed(title="🔐 Sicheres Passwort", color=FARBE_TOOL)
+        embed.add_field(name="Passwort", value=f"||`{passwort}`||", inline=False)
+        embed.add_field(name="Länge", value=str(laenge), inline=True)
+        embed.set_footer(text="⚠️ Nur du kannst das Spoiler-Feld öffnen! Speichere es sicher.")
+        await message.reply(embed=embed)
+
+    # ─── !umrechnen Befehl ───────────────────────────────────
+    elif inhalt.startswith("!umrechnen "):
+        teile = inhalt.split(" ")
+        if len(teile) < 4:
+            embed = discord.Embed(title="🔄 Umrechner", description=(
+                "Nutze: `!umrechnen [zahl] [von] [zu]`\n\n"
+                "**Verfügbar:**\n"
+                "`km` ↔ `miles` ↔ `m`\n"
+                "`kg` ↔ `lbs` ↔ `g`\n"
+                "`celsius` ↔ `fahrenheit`\n"
+                "`liter` ↔ `gallonen`\n"
+                "`euro` ↔ `dollar`"
+            ), color=FARBE_TOOL)
+            await message.reply(embed=embed)
+        else:
+            try:
+                zahl = float(teile[1])
+                von = teile[2].lower()
+                zu = teile[3].lower()
+                umrechnungen = {
+                    ("km", "miles"): lambda x: x * 0.621371,
+                    ("miles", "km"): lambda x: x * 1.60934,
+                    ("km", "m"): lambda x: x * 1000,
+                    ("m", "km"): lambda x: x / 1000,
+                    ("kg", "lbs"): lambda x: x * 2.20462,
+                    ("lbs", "kg"): lambda x: x / 2.20462,
+                    ("kg", "g"): lambda x: x * 1000,
+                    ("g", "kg"): lambda x: x / 1000,
+                    ("celsius", "fahrenheit"): lambda x: x * 9/5 + 32,
+                    ("fahrenheit", "celsius"): lambda x: (x - 32) * 5/9,
+                    ("liter", "gallonen"): lambda x: x * 0.264172,
+                    ("gallonen", "liter"): lambda x: x * 3.78541,
+                    ("euro", "dollar"): lambda x: x * 1.08,
+                    ("dollar", "euro"): lambda x: x / 1.08,
+                }
+                if (von, zu) in umrechnungen:
+                    ergebnis = round(umrechnungen[(von, zu)](zahl), 4)
+                    embed = discord.Embed(title="🔄 Umrechnung", color=FARBE_TOOL)
+                    embed.add_field(name="Eingabe", value=f"`{zahl} {von}`", inline=True)
+                    embed.add_field(name="Ergebnis", value=f"**{ergebnis} {zu}**", inline=True)
+                    await message.reply(embed=embed)
+                else:
+                    await message.reply(embed=fehler_embed(f"Kann `{von}` nicht in `{zu}` umrechnen!"))
+            except ValueError:
+                await message.reply(embed=fehler_embed("Ungültige Zahl!"))
+
+    # ─── !ship Befehl ────────────────────────────────────────
+    elif inhalt.startswith("!ship"):
+        if len(message.mentions) >= 2:
+            u1 = message.mentions[0]
+            u2 = message.mentions[1]
+        elif len(message.mentions) == 1:
+            u1 = message.author
+            u2 = message.mentions[0]
+        else:
+            await message.reply(embed=fehler_embed("Nutze: `!ship @user1 @user2`"))
+            return
+
+        seed = (u1.id + u2.id) % 101
+        random.seed(seed)
+        prozent = random.randint(0, 100)
+        random.seed()
+
+        if prozent >= 80:
+            emoji, text = "💕", "Perfektes Match!"
+        elif prozent >= 60:
+            emoji, text = "💖", "Sehr gute Chancen!"
+        elif prozent >= 40:
+            emoji, text = "💛", "Naja, könnte klappen..."
+        elif prozent >= 20:
+            emoji, text = "💔", "Eher nicht..."
+        else:
+            emoji, text = "😬", "Keine Chance!"
+
+        balken = "❤️" * (prozent // 10) + "🖤" * (10 - prozent // 10)
+        embed = discord.Embed(title=f"💘 Ship-O-Meter", description=f"**{u1.display_name}** & **{u2.display_name}**\n\n{balken}\n\n**{prozent}%** {emoji}\n*{text}*", color=0xFF6B9D)
+        await message.reply(embed=embed)
+
+    # ════════════════════════════════════════════════════════
+    # 🎉 SERVER-FUNKTIONEN (Willkommen, Giveaway)
+    # ════════════════════════════════════════════════════════
+
+    # ─── !willkommen Befehl ──────────────────────────────────
+    elif inhalt.startswith("!willkommen"):
+        if not message.author.guild_permissions.manage_guild:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
+        else:
+            teile = inhalt.split(" ", 1)
+            if len(teile) > 1 and teile[1] == "aus":
+                willkommen_kanal.pop(str(message.guild.id), None)
+                await message.reply(embed=discord.Embed(description="✅ Willkommensnachrichten deaktiviert!", color=FARBE_ERFOLG))
+            else:
+                willkommen_kanal[str(message.guild.id)] = message.channel.id
+                await message.reply(embed=discord.Embed(description=f"✅ Willkommensnachrichten in {message.channel.mention} aktiviert!\nNeue Mitglieder werden hier begrüßt.", color=FARBE_ERFOLG))
+
+    # ─── !giveaway Befehl ────────────────────────────────────
+    elif inhalt.startswith("!giveaway "):
+        if not message.author.guild_permissions.manage_guild:
+            await message.reply(embed=fehler_embed("Du brauchst die Berechtigung **Server verwalten**!"))
+        else:
+            teile = inhalt.split(" ", 2)
+            if len(teile) < 3:
+                await message.reply(embed=fehler_embed("Nutze: `!giveaway [zeit] [preis]`\nz.B. `!giveaway 1m Nitro`"))
+            else:
+                sekunden = parse_zeit(teile[1])
+                preis = teile[2]
+                if sekunden is None:
+                    await message.reply(embed=fehler_embed("Ungültige Zeit! Nutze z.B. `10m`, `1h`"))
+                else:
+                    embed = discord.Embed(title="🎉 GIVEAWAY!", description=f"**Preis:** {preis}\n\n**Zeit:** {teile[1]}\n\nReagiere mit 🎉 um teilzunehmen!", color=0xF1C40F)
+                    embed.set_footer(text=f"Veranstaltet von {user_name}")
+                    giveaway_msg = await message.channel.send(embed=embed)
+                    await giveaway_msg.add_reaction("🎉")
+                    await message.delete()
+                    await asyncio.sleep(sekunden)
+                    giveaway_msg = await message.channel.fetch_message(giveaway_msg.id)
+                    reaktion = discord.utils.get(giveaway_msg.reactions, emoji="🎉")
+                    teilnehmer = [u async for u in reaktion.users() if not u.bot]
+                    if teilnehmer:
+                        gewinner = random.choice(teilnehmer)
+                        ende_embed = discord.Embed(title="🎉 Giveaway beendet!", description=f"**Preis:** {preis}\n**Gewinner:** {gewinner.mention} 🎊", color=FARBE_ERFOLG)
+                        await message.channel.send(content=gewinner.mention, embed=ende_embed)
+                    else:
+                        await message.channel.send(embed=discord.Embed(description="😢 Keine Teilnehmer beim Giveaway!", color=FARBE_FEHLER))
+
     # ─── !reset Befehl ─────────────────────────────────────
     elif inhalt == "!reset":
         chat_verlaeufe[user_id] = []
@@ -1151,8 +1491,14 @@ async def on_message(message):
             "`!quiz` — Allgemeinwissen-Quiz"
         ), inline=False)
         embed.add_field(name="🛠️ Tools", value=(
+            "`!avatar [@user]` · `!passwort [länge]`\n"
+            "`!umrechnen [zahl] [von] [zu]` · `!ship @user [@user2]`\n"
             "`!umfrage [frage]` · `!erinnere [zeit] [text]`\n"
             "`!todo add/liste/done/clear`"
+        ), inline=False)
+        embed.add_field(name="🎉 Server", value=(
+            "`!willkommen` / `!willkommen aus` — Begrüßungskanal\n"
+            "`!giveaway [zeit] [preis]` — Gewinnspiel starten"
         ), inline=False)
         embed.add_field(name="⭐ Level", value=(
             "`!level` · `!rangliste`"
@@ -1574,5 +1920,3 @@ async def slash_clear(interaction: discord.Interaction, anzahl: int):
         await interaction.response.send_message(embed=discord.Embed(description=f"🧹 **{len(deleted)}** Nachrichten gelöscht!", color=FARBE_ERFOLG), ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message(embed=fehler_embed("Mir fehlt die Berechtigung **Nachrichten verwalten**!"), ephemeral=True)
-
-
