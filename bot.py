@@ -229,4 +229,227 @@ async def sell(interaction: discord.Interaction, erz_id: app_commands.Choice[str
     if u.inventar.get(erz_id.value, 0) < anzahl or anzahl <= 0: return await interaction.response.send_message(embed=fehler_embed("Du hast nicht genügend Erze im Inventar."), ephemeral=True)
     erloes = ERZ_PREISE[erz_id.value]["wert"] * anzahl; u.inventar[erz_id.value] -= anzahl; u.muenzen += erloes; state.speichern()
     await interaction.response.send_message(embed=erstelle_embed("⚖️ Rohstoff-Markt", f"Du hast {anzahl}x {erz_id.name} für **{erloes} Münzen** verkauft.", BotFarben.WIRTSCHAFT))
+  @bot.tree.command(name="shop", description="Öffnet den Marktplatz.")
+async def shop(interaction: discord.Interaction):
+    embed = erstelle_embed("🛒 Server-Marktplatz", "Nutze `/buy <item>` zum Einkaufen.", BotFarben.WIRTSCHAFT)
+    for k, i in SHOP_ITEMS.items():
+        embed.add_field(name=i["name"], value=f"Code: `{k}` · Preis: **{i['preis']} Münzen**\n*{i['beschreibung']}*", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="buy", description="Kaufe ein Item aus dem Laden.")
+@app_commands.choices(item_id=[app_commands.Choice(name="🍪 Kekse", value="kekse"), app_commands.Choice(name="🥩 Steak", value="steak"), app_commands.Choice(name="🍼 Milchflasche", value="milch")])
+async def buy(interaction: discord.Interaction, item_id: app_commands.Choice[str]):
+    u = state.get_user(str(interaction.user.id)); item = SHOP_ITEMS[item_id.value]
+    if u.muenzen < item["preis"]: return await interaction.response.send_message(embed=fehler_embed("Dein Geld reicht dafür nicht aus."), ephemeral=True)
+    u.muenzen -= item["preis"]; u.inventar[item_id.value] = u.inventar.get(item_id.value, 0) + 1; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🛒 Kauf erfolgreich", f"Du hast {item['name']} für dein Inventar erworben.", BotFarben.ERFOLG))
+
+@bot.tree.command(name="inventory", description="Zeigt deine gesammelten Schätze.")
+async def inventory(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    inhalt = []
+    for k, v in u.inventar.items():
+        if v > 0:
+            name = SHOP_ITEMS[k]["name"] if k in SHOP_ITEMS else ERZ_PREISE[k]["name"]
+            inhalt.append(f"{name}: **{v}x**")
+    await interaction.response.send_message(embed=erstelle_embed("🎒 Dein Inventar", "\n".join(inhalt) if inhalt else "*Dein Rucksack ist komplett leer.*", BotFarben.TOOL))
+
+# ─── HAUSTIER STEUERUNG ─────────────────────────────────────
+@bot.tree.command(name="pet-adopt", description="Adoptiere einen treuen Begleiter.")
+@app_commands.choices(typ=[app_commands.Choice(name="🐱 Katze", value="Katze"), app_commands.Choice(name="🐶 Hund", value="Hund")])
+async def pet_adopt(interaction: discord.Interaction, typ: app_commands.Choice[str], name: str):
+    u_id = str(interaction.user.id)
+    if u_id in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Du besitzt bereits ein Haustier."), ephemeral=True)
+    state.pet_daten[u_id] = PetProfile(name=name, typ=typ.value); state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🐾 Zuwachs", f"Du hast erfolgreich die/den {typ.name} **{name}** adoptiert!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="pet-status", description="Prüfe das Wohlbefinden deines Haustiers.")
+async def pet_status(interaction: discord.Interaction):
+    p = state.pet_daten.get(str(interaction.user.id))
+    if not p: return await interaction.response.send_message(embed=fehler_embed("Du hast kein Haustier."), ephemeral=True)
+    await interaction.response.send_message(embed=erstelle_embed(f"🐾 Begleiter {p.name}", f"Spezies: **{p.typ}**\nLevel: **{p.level}**\nHungerstatus: `{p.hunger}/100`", BotFarben.INFO))
+
+@bot.tree.command(name="pet-feed", description="Füttere dein Haustier mit Vorräten.")
+@app_commands.choices(futter=[app_commands.Choice(name="🍪 Keks", value="kekse"), app_commands.Choice(name="🥩 Steak", value="steak")])
+async def pet_feed(interaction: discord.Interaction, futter: app_commands.Choice[str]):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); p = state.pet_daten.get(u_id)
+    if not p: return await interaction.response.send_message(embed=fehler_embed("Du hast kein Haustier zum Füttern."), ephemeral=True)
+    if u.inventar.get(futter.value, 0) <= 0: return await interaction.response.send_message(embed=fehler_embed("Dieses Futter musst du erst im Shop erwerben."), ephemeral=True)
     
+    u.inventar[futter.value] -= 1
+    p.hunger = max(0, p.hunger - (30 if futter.value == "kekse" else 80))
+    p.level += 1; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🍖 Mampf!", f"Du fütterst {p.name}. Das Haustier steigt auf **Level {p.level}**!", BotFarben.ERFOLG))  
+@bot.tree.command(name="ship", description="Misst die Liebe zwischen zwei Usern.")
+async def ship(interaction: discord.Interaction, user: discord.Member):
+    prozent = random.randint(0, 100)
+    await interaction.response.send_message(embed=erstelle_embed("💘 Liebes-Barometer", f"{interaction.user.mention} & {user.mention} passen zu **{prozent}%** zusammen!", BotFarben.TOOL))
+
+@bot.tree.command(name="marry", description="Mache jemandem einen Heiratsantrag.")
+async def marry(interaction: discord.Interaction, partner: discord.Member):
+    u_id, p_id = str(interaction.user.id), str(partner.id); u = state.get_user(u_id)
+    if u.partner_id or partner.bot or partner == interaction.user: return await interaction.response.send_message(embed=fehler_embed("Diese Hochzeit ist nicht möglich."), ephemeral=True)
+    
+    await interaction.response.send_message(f"💍 {partner.mention}, nimmst du den Antrag von {interaction.user.mention} an? Antworte mit **'ja ich will'**!")
+    try:
+        def check(m): return m.author.id == partner.id and m.content.lower() == "ja ich will" and m.channel.id == interaction.channel_id
+        await bot.wait_for("message", check=check, timeout=60.0)
+        jetzt = datetime.now(timezone.utc).isoformat()
+        u.partner_id = p_id; u.hochzeits_datum = jetzt
+        state.get_user(p_id).partner_id = u_id; state.get_user(p_id).hochzeits_datum = jetzt
+        state.speichern()
+        await interaction.channel.send(embed=erstelle_embed("🎉 Bund fürs Leben", f"{interaction.user.mention} und {partner.mention} sind jetzt verheiratet!", BotFarben.ERFOLG))
+    except asyncio.TimeoutError:
+        await interaction.channel.send("💔 Der Antrag ist unbeantwortet abgelaufen.")
+
+@bot.tree.command(name="divorce", description="Reiche die Scheidung ein.")
+async def divorce(interaction: discord.Interaction):
+    u_id = str(interaction.user.id); u = state.get_user(u_id)
+    if not u.partner_id: return await interaction.response.send_message(embed=fehler_embed("Du bist nicht verheiratet."), ephemeral=True)
+    p_id = u.partner_id; u.partner_id = None; u.hochzeits_datum = None; u.kinder.clear()
+    state.get_user(p_id).partner_id = None; state.get_user(p_id).hochzeits_datum = None; state.get_user(p_id).kinder.clear()
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("💔 Getrennte Wege", "Die Ehe wurde geschieden, die Familie aufgelöst.", BotFarben.FEHLER))
+
+@bot.tree.command(name="marry-status", description="Zeigt deinen Beziehungsstatus.")
+async def marry_status(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    text = f"💍 Verheiratet mit <@{u.partner_id}>" if u.partner_id else "🕊️ Single"
+    await interaction.response.send_message(embed=erstelle_embed("Ehe-Status", text, BotFarben.INFO))
+
+@bot.tree.command(name="love", description="Verbringt romantische Zeit. Nach 2 Tagen Ehe besteht eine 60% Chance auf ein Kind.")
+async def love(interaction: discord.Interaction, kind_name: str):
+    u_id = str(interaction.user.id); u = state.get_user(u_id)
+    if not u.partner_id: return await interaction.response.send_message(embed=fehler_embed("Dafür müsst ihr verheiratet sein!"), ephemeral=True)
+    
+    h_datum = datetime.fromisoformat(u.hochzeits_datum)
+    if datetime.now(timezone.utc) < h_datum + timedelta(days=2):
+        verbleibend = (h_datum + timedelta(days=2)) - datetime.now(timezone.utc)
+        stunden = int(verbleibend.total_seconds() // 3600)
+        return await interaction.response.send_message(embed=fehler_embed(f"Ihr seid noch frisch verheiratet. Kuscheln erlaubt, aber ein Kind geht erst in `{stunden} Std.`!"), ephemeral=True)
+        
+    if len(u.kinder) >= 3: return await interaction.response.send_message(embed=fehler_embed("Eure Familie hat das Limit von 3 Kindern erreicht."), ephemeral=True)
+    if kind_name in u.kinder: return await interaction.response.send_message(embed=fehler_embed("Der Name ist in eurer Familie schon vergeben."), ephemeral=True)
+
+    await interaction.response.defer()
+    await asyncio.sleep(2)
+    
+    if random.random() < 0.60:
+        n_kind = asdict(ChildProfile(name=kind_name))
+        u.kinder[kind_name] = n_kind
+        state.get_user(u.partner_id).kinder[kind_name] = n_kind; state.speichern()
+        await interaction.followup.send(embed=erstelle_embed("👶 Nachwuchs!", f"Herzlichen Glückwunsch! Eure Liebe hat Früchte getragen: **{kind_name}** wurde geboren!", BotFarben.ERFOLG))
+    else:
+        await interaction.followup.send(embed=erstelle_embed("❤️ Romantischer Abend", "Ihr hattet ein wunderschönes Date, aber es ist kein Kind entstanden.", BotFarben.INFO))
+
+@bot.tree.command(name="family", description="Zeigt deine Kinder.")
+async def family(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    if not u.kinder: return await interaction.response.send_message(embed=erstelle_embed("🏠 Stammbaum", "Ihr habt noch keine Kinder.", BotFarben.INFO))
+    embed = erstelle_embed("🏠 Familienspiegel", "Status eurer Kinder:", BotFarben.INFO)
+    for k, v in u.kinder.items(): embed.add_field(name=f"👶 {k}", value=f"Stufe: Level {v['level']} | Hunger: {v['hunger']}/100", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="baby-feed", description="Füttere dein Kind mit Milch.")
+async def baby_feed(interaction: discord.Interaction, name: str):
+    u_id = str(interaction.user.id); u = state.get_user(u_id)
+    if name not in u.kinder: return await interaction.response.send_message(embed=fehler_embed("Dieses Kind gehört nicht zu deiner Familie."), ephemeral=True)
+    if u.inventar.get("milch", 0) <= 0: return await interaction.response.send_message(embed=fehler_embed("Du besitzt keine `milch` im Rucksack."), ephemeral=True)
+    
+    u.inventar["milch"] -= 1; k = u.kinder[name]; k["hunger"] = max(0, k["hunger"] - 35); k["level"] += 1
+    if u.partner_id: state.get_user(u.partner_id).kinder[name] = k
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🍼 Milchflasche", f"Du hast **{name}** gefüttert. Es ist glücklich auf **Level {k['level']}**!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="baby-play", description="Spiele mit deinem Kind.")
+async def baby_play(interaction: discord.Interaction, name: str):
+    u = state.get_user(str(interaction.user.id))
+    if name not in u.kinder: return await interaction.response.send_message(embed=fehler_embed("Kind nicht gefunden."), ephemeral=True)
+    xp_geben(str(interaction.user.id), 40)
+    await interaction.response.send_message(embed=erstelle_embed("🧸 Spielstunde", f"Du baust Bauklötze mit **{name}**. (+40 User-XP)", BotFarben.ERFOLG))
+    # ─── NEUES GROSSES QUIZ SYSTEM ─────────────────────────────
+@bot.tree.command(name="quiz", description="Starte ein Server-Quiz und gewinne Münzen!")
+async def quiz(interaction: discord.Interaction):
+    eintrag = random.choice(QUIZ_FRAGEN)
+    await interaction.response.send_message(embed=erstelle_embed("🧠 Quiz-Zentrale", f"Hier ist deine Preisfrage:\n\n**{eintrag['frage']}**\n\n*Schreibe die richtige Antwort innerhalb von 25 Sekunden in den Chat!*", BotFarben.SPIEL))
+    
+    try:
+        def check(m): return m.channel.id == interaction.channel_id and not m.author.bot
+        msg = await bot.wait_for("message", check=check, timeout=25.0)
+        
+        if msg.content.lower().strip() == eintrag["antwort"].lower().strip():
+            u = state.get_user(str(msg.author.id)); u.muenzen += 35; state.speichern()
+            await interaction.channel.send(embed=erstelle_embed("🎉 Richtige Antwort!", f"{msg.author.mention} hat die Frage blitzschnell gelöst!\nBelohnung: **+35 Münzen** 🪙", BotFarben.ERFOLG))
+        else:
+            await interaction.channel.send(embed=erstelle_embed("❌ Falsche Antwort", f"Schade, das war leider nicht korrekt. Die richtige Antwort war: **{eintrag['antwort']}**.", BotFarben.FEHLER))
+    except asyncio.TimeoutError:
+        await interaction.channel.send(embed=erstelle_embed("⏰ Zeit abgelaufen", f"Niemand hat rechtzeitig geantwortet. Die Lösung war: **{eintrag['antwort']}**", BotFarben.INFO))
+
+# ─── WEITERE MINISPIELE & FUN FUNCTIONS ───────────────────
+@bot.tree.command(name="coinflip", description="Setze Münzen auf Kopf oder Zahl.")
+@app_commands.choices(tipp=[app_commands.Choice(name="Kopf", value="kopf"), app_commands.Choice(name="Zahl", value="zahl")])
+async def coinflip(interaction: discord.Interaction, tipp: app_commands.Choice[str], einsatz: int):
+    u = state.get_user(str(interaction.user.id))
+    if u.muenzen < einsatz or einsatz <= 0: return await interaction.response.send_message(embed=fehler_embed("Ungültiger oder zu hoher Einsatz."), ephemeral=True)
+    
+    seite = "kopf" if random.random() < 0.50 else "zahl"
+    if tipp.value == seite:
+        u.muenzen += einsatz
+        await interaction.response.send_message(embed=erstelle_embed("🎉 Gewonnen!", f"Die Münze zeigt {seite}! Du gewinnst **{einsatz} Münzen**.", BotFarben.ERFOLG))
+    else:
+        u.muenzen -= einsatz
+        await interaction.response.send_message(embed=erstelle_embed("📉 Verloren!", f"Die Münze landete auf {seite}. Du verlierst **{einsatz} Münzen**.", BotFarben.FEHLER))
+    state.speichern()
+
+@bot.tree.command(name="schere-stein", description="Fordere den Bot heraus.")
+@app_commands.choices(wahl=[app_commands.Choice(name="Schere", value="schere"), app_commands.Choice(name="Stein", value="stein"), app_commands.Choice(name="Papier", value="papier")])
+async def ssp(interaction: discord.Interaction, wahl: app_commands.Choice[str]):
+    gegner = random.choice(["schere", "stein", "papier"])
+    if wahl.value == gegner: msg = f"Gleichstand! Beide wählten **{wahl.name}**."
+    elif (wahl.value == "schere" and gegner == "papier") or (wahl.value == "stein" and gegner == "schere") or (wahl.value == "papier" and gegner == "stein"):
+        msg = f"Sieg! Deine Auswahl **{wahl.name}** schlägt **{gegner}**."
+    else: msg = f"Niederlage! Der Bot kontert mit **{gegner}**."
+    await interaction.response.send_message(embed=erstelle_embed("🎮 Schere-Stein-Papier", msg, BotFarben.SPIEL))
+
+@bot.tree.command(name="zahlen-raten", description="Errate die Geheimzahl von 1 bis 10.")
+async def raten(interaction: discord.Interaction, zahl: int):
+    ziel = random.randint(1, 10)
+    if zahl == ziel: await interaction.response.send_message(embed=erstelle_embed("🎯 Volltreffer", "Genau getroffen!", BotFarben.ERFOLG))
+    else: await interaction.response.send_message(embed=erstelle_embed("❌ Daneben", f"Die gesuchte Zahl war **{ziel}**.", BotFarben.FEHLER))
+
+@bot.tree.command(name="wurf", description="Wirft einen Würfel.")
+async def wurf(interaction: discord.Interaction, seiten: int = 6):
+    await interaction.response.send_message(embed=erstelle_embed("🎲 Würfel", f"Ergebnis: **{random.randint(1, max(2, seiten))}**", BotFarben.SPIEL))
+
+# ─── NEURONALE KI SCHNITTTSTELLE & PROFIL ───────────────────
+@bot.tree.command(name="ki", description="Frage die KI.")
+async def ki(interaction: discord.Interaction, frage: str):
+    await interaction.response.defer(); u_id = str(interaction.user.id); u = state.get_user(u_id)
+    try:
+        if u_id not in state.chat_verlaeufe: state.chat_verlaeufe[u_id] = []
+        state.chat_verlaeufe[u_id].append({"role": "user", "content": frage})
+        sys = PERSONAS.get(u.ki_persona, "standard")
+        antwort = await groq_anfrage([{"role": "system", "content": sys}] + state.chat_verlaeufe[u_id][-6:])
+        state.chat_verlaeufe[u_id].append({"role": "assistant", "content": antwort})
+        await interaction.followup.send(embed=erstelle_embed("🤖 KI", antwort[:2000], BotFarben.KI))
+    except Exception as e: await interaction.followup.send(embed=fehler_embed(str(e)))
+
+@bot.tree.command(name="persönlichkeit", description="Ändere die Persona der KI.")
+@app_commands.choices(wahl=[app_commands.Choice(name="Standard", value="standard"), app_commands.Choice(name="Pirat", value="pirat")])
+async def persoenlichkeit_cmd(interaction: discord.Interaction, wahl: app_commands.Choice[str]):
+    state.get_user(str(interaction.user.id)).ki_persona = wahl.value; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎭 Persona", f"Modus **{wahl.name}** ist bereit.", BotFarben.TOOL))
+
+@bot.tree.command(name="rank", description="Zeigt deine Statistiken.")
+async def rank(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    await interaction.response.send_message(embed=erstelle_embed("⭐ Dein Profil", f"Level: **{u.level}**\nErfahrung: `{u.xp}/{u.level*100} XP`\nMünzen: `🪙 {u.muenzen}`", BotFarben.INFO))
+
+@bot.tree.command(name="leaderboard", description="Zeigt die Server-Besten.")
+async def leaderboard(interaction: discord.Interaction):
+    sortiert = sorted(state.user_daten.items(), key=lambda x: x[1].gesamt_xp, reverse=True)[:5]
+    t = "\n".join(f"#{i+1} · <@{uid}> · Level {d.level}" for i, (uid, d) in enumerate(sortiert))
+    await interaction.response.send_message(embed=erstelle_embed("🏆 Top 5 Rangliste", t if t else "Keine Daten.", BotFarben.SPIEL))
+
+# ─── BOT START ─────────────────────────────────────────────
+bot.run(DISCORD_TOKEN)
