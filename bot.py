@@ -1,10 +1,14 @@
 import discord
+from discord import app_commands
 import aiohttp
 import os
 import random
 import asyncio
 import string
+import json
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,738 +16,557 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-BOT_START = datetime.now(timezone.utc)
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = discord.Client(intents=intents)
+# ─── CONFIGURATION: STATICS ────────────────────────────────
+LEVEL_ROLLEN_BELOHNUNGEN = {
+    5: "Bronze-Mitglied",
+    10: "Silber-Mitglied",
+    20: "Gold-Mitglied",
+    50: "Server-Legende"
+}
 
-# ─── Daten ─────────────────────────────────────────────────
-chat_verlaeufe = {}
-persoenlichkeit = {}
-merkliste = {}
-levels = {}  # Struktur: {user_id: {"xp": 0, "level": 1, "gesamt_xp": 0}}
-rate_spiel = {}
-todo_listen = {}
-warnungen = {}
-hangman_spiele = {}
-quiz_spiele = {}
-tictactoe_spiele = {}
-willkommen_kanal = {}
+SHOP_ITEMS = {
+    "kekse": {"name": "🍪 Kekse", "preis": 25, "beschreibung": "Leckeres Futter für dein Haustier (-30 Hunger)"},
+    "steak": {"name": "🥩 Premium Steak", "preis": 60, "beschreibung": "Perfekt für Drachen und Hunde (-80 Hunger)"},
+    "booster": {"name": "⚡ XP-Booster", "preis": 150, "beschreibung": "Gibt dir sofort 200 zusätzliche User-XP"},
+    "gluecksbringer": {"name": "🍀 Glücksbringer", "preis": 300, "beschreibung": "Erhöht deine Gewinnchancen bei Minigames passiv"}
+}
 
-# ─── Design ────────────────────────────────────────────────
-FARBE_KI      = 0x5865F2
-FARBE_ERFOLG  = 0x57F287
-FARBE_FEHLER  = 0xED4245
-FARBE_SPIEL   = 0xFEE75C
-FARBE_TOOL    = 0xEB459E
-FARBE_INFO    = 0x5DADE2
-
-# ─── Persönlichkeiten ──────────────────────────────────────
 PERSONAS = {
-    "anwalt":   "Du bist ein seriöser Anwalt. Formell, präzise, du sprichst den User mit 'Sie' an.",
-    "mädel":    "Du bist eine freche, lustige Freundin. Locker, mit Emojis 😊✨. Du sagst 'du'.",
-    "lehrer":   "Du bist ein geduldiger Lehrer. Schritt für Schritt, ermutigend.",
-    "pirat":    "Du bist ein wilder Pirat! Arrr, Landratte! Dramatisch und abenteuerlustig.",
+    "anwalt": "Du bist ein seriöser Anwalt. Formell, präzise, du sprichst den User mit 'Sie' an.",
+    "mädel": "Du bist eine freche, lustige Freundin. Locker, mit Emojis 😊✨. Du sagst 'du'.",
+    "lehrer": "Du bist ein geduldiger Lehrer. Schritt für Schritt, ermutigend.",
+    "pirat": "Du bist ein wilder Pirat! Arrr, Landratte! Dramatisch und abenteuerlustig.",
     "standard": "Du bist ein hilfreicher Assistent."
 }
-PERSONA_INFO = {
-    "anwalt":   {"emoji": "🧑‍⚖️", "farbe": 0x2C3E50, "name": "Anwalt"},
-    "mädel":    {"emoji": "👧",    "farbe": 0xFF6B9D, "name": "Mädel"},
-    "lehrer":   {"emoji": "👨‍🏫", "farbe": 0x27AE60, "name": "Lehrer"},
-    "pirat":    {"emoji": "🏴‍☠️", "farbe": 0x8B4513, "name": "Pirat"},
-    "standard": {"emoji": "🤖",    "farbe": FARBE_KI, "name": "Standard"},
-}
 
-# ─── Hangman ───────────────────────────────────────────────
-HANGMAN_WOERTER = ["python","discord","programmieren","computer","internet",
-                   "datenbank","algorithmus","software","netzwerk","server"]
-HANGMAN_BILDER = [
-    "```\n  +---+\n  |   |\n      |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n      |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n  |   |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|   |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n=========```",
-    "```\n  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n=========```",
-]
+# Farb-Palette für konsistentes UI-Design
+class BotFarben:
+    KI = 0x5865F2
+    ERFOLG = 0x57F287
+    FEHLER = 0xED4245
+    SPIEL = 0xFEE75C
+    TOOL = 0xEB459E
+    INFO = 0x5DADE2
+    WIRTSCHAFT = 0xE67E22
 
-# ─── Quiz ──────────────────────────────────────────────────
-QUIZ_FRAGEN = [
-    {"frage":"Was ist die Hauptstadt von Deutschland?","antworten":["A) München","B) Berlin","C) Hamburg","D) Frankfurt"],"richtig":"B"},
-    {"frage":"Wie viele Planeten hat unser Sonnensystem?","antworten":["A) 7","B) 9","C) 8","D) 10"],"richtig":"C"},
-    {"frage":"Was ist H2O?","antworten":["A) Salz","B) Sauerstoff","C) Wasser","D) Wasserstoff"],"richtig":"C"},
-    {"frage":"Wer entwickelte die Relativitätstheorie?","antworten":["A) Newton","B) Einstein","C) Hawking","D) Tesla"],"richtig":"B"},
-    {"frage":"Wie viele Sekunden hat eine Stunde?","antworten":["A) 3000","B) 3200","C) 3600","D) 4000"],"richtig":"C"},
-    {"frage":"Wie viele Bits hat ein Byte?","antworten":["A) 4","B) 16","C) 8","D) 32"],"richtig":"C"},
-    {"frage":"Welches Tier ist das größte der Welt?","antworten":["A) Elefant","B) Blauwal","C) Hai","D) Giraffe"],"richtig":"B"},
-    {"frage":"Wie viele Kontinente hat die Erde?","antworten":["A) 5","B) 6","C) 7","D) 8"],"richtig":"C"},
-]
+# ─── DATA MODELS (PROFESSIONELLE DATENHALTUNG) ─────────────
+@dataclass
+class UserProfile:
+    xp: int = 0
+    level: int = 1
+    gesamt_xp: int = 0
+    muenzen: int = 100  # Startguthaben
+    inventar: Dict[str, int] = field(default_factory=dict)
+    todo: List[str] = field(default_factory=list)
+    ki_persona: str = "standard"
+    partner_id: Optional[str] = None
+    letztes_daily: Optional[str] = None  # ISO-String für Zeitzonen-Sicherheit
 
-# ─── Hilfsfunktionen ───────────────────────────────────────
-def fehler_embed(text):
-    return discord.Embed(description=f"❌ {text}", color=FARBE_FEHLER)
+@dataclass
+class PetProfile:
+    name: str
+    typ: str
+    level: int = 1
+    hunger: int = 20
+    letztes_streicheln: Optional[str] = None
 
-def parse_zeit(text):
-    try:
-        einheit = text[-1].lower()
-        zahl = int(text[:-1])
-        return {"s": zahl, "m": zahl*60, "h": zahl*3600}.get(einheit)
-    except Exception:
-        return None
+# Globaler State-Manager
+class BotState:
+    def __init__(self, datei_pfad: str = "bot_daten.json"):
+        self.datei_pfad = datei_pfad
+        self.user_daten: Dict[str, UserProfile] = {}
+        self.pet_daten: Dict[str, PetProfile] = {}
+        self.chat_verlaeufe: Dict[str, List[dict]] = {}
+        self.laden()
 
-def xp_geben(user_id, menge=5):
-    if user_id not in levels:
-        levels[user_id] = {"xp": 0, "level": 1, "gesamt_xp": 0}
-    
-    levels[user_id]["xp"] += menge
-    levels[user_id]["gesamt_xp"] += menge
-    
-    benoetigt = levels[user_id]["level"] * 100
+    def get_user(self, user_id: str) -> UserProfile:
+        if user_id not in self.user_daten:
+            self.user_daten[user_id] = UserProfile()
+        return self.user_daten[user_id]
+
+    def speichern(self):
+        daten = {
+            "users": {uid: asdict(prof) for uid, prof in self.user_daten.items()},
+            "pets": {uid: asdict(prof) for uid, prof in self.pet_daten.items()}
+        }
+        with open(self.datei_pfad, "w", encoding="utf-8") as f:
+            json.dump(daten, f, ensure_ascii=False, indent=4)
+
+    def laden(self):
+        if os.path.exists(self.datei_pfad):
+            try:
+                with open(self.datei_pfad, "r", encoding="utf-8") as f:
+                    daten = json.load(f)
+                    self.user_daten = {uid: UserProfile(**v) for uid, v in daten.get("users", {}).items()}
+                    self.pet_daten = {uid: PetProfile(**v) for uid, v in daten.get("pets", {}).items()}
+            except Exception as e:
+                print(f"⚠️ Fehler beim Laden der Datenbank: {e}. Erstelle neue Daten.")
+
+state = BotState()
+
+# ─── BOT INITIALISIERUNG & KERN-LOGIK ──────────────────────
+class MyBot(discord.Client):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        # Automatischer Speicher-Task im Hintergrund (alle 5 Minuten)
+        self.loop.create_task(self.automatischer_speicher_task())
+
+    async def automatischer_speicher_task(self):
+        while not self.is_closed():
+            await asyncio.sleep(300)
+            state.speichern()
+            print("💾 Datenbank-Auto-Save erfolgreich ausgeführt.")
+
+bot = MyBot()
+
+# ─── INTERNE HELPER RE-DESIGNED ────────────────────────────
+def erstelle_embed(titel: str, beschreibung: str, farbe: int) -> discord.Embed:
+    return discord.Embed(title=titel, description=beschreibung, color=farbe, timestamp=datetime.now(timezone.utc))
+
+def fehler_embed(text: str) -> discord.Embed:
+    return erstelle_embed("❌ System-Fehler", text, BotFarben.FEHLER)
+
+async def pruefe_und_gebe_level_rolle(member: discord.Member, neues_level: int) -> Optional[str]:
+    if neues_level in LEVEL_ROLLEN_BELOHNUNGEN:
+        rollen_name = LEVEL_ROLLEN_BELOHNUNGEN[neues_level]
+        rolle = discord.utils.get(member.guild.roles, name=rollen_name)
+        if rolle:
+            try:
+                await member.add_roles(rolle)
+                return rollen_name
+            except discord.Forbidden:
+                return None
+    return None
+
+def xp_geben(user_id: str, menge: int = 5) -> bool:
+    u = state.get_user(user_id)
+    u.xp += menge
+    u.gesamt_xp += menge
+    benoetigt = u.level * 100
     level_up = False
-    
-    while levels[user_id]["xp"] >= benoetigt:
-        levels[user_id]["xp"] -= benoetigt
-        levels[user_id]["level"] += 1
-        benoetigt = levels[user_id]["level"] * 100
+    while u.xp >= benoetigt:
+        u.xp -= benoetigt
+        u.level += 1
+        benoetigt = u.level * 100
         level_up = True
-        
     return level_up
 
-async def groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=1000):
+async def groq_anfrage(messages: list, modell: str = "llama-3.3-70b-versatile") -> str:
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": modell, "messages": messages, "max_tokens": max_tokens}
+    payload = {"model": modell, "messages": messages, "max_tokens": 800}
     async with aiohttp.ClientSession() as session:
-        async with session.post(GROQ_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            data = await resp.json()
+        async with session.post(GROQ_URL, headers=headers, json=payload, timeout=25) as resp:
             if resp.status != 200:
-                raise Exception(f"Groq Fehler: {data}")
+                raise Exception(f"Groq-Schnittstelle verweigert Dienst (Status: {resp.status})")
+            data = await resp.json()
             return data["choices"][0]["message"]["content"]
 
-# ─── Events ────────────────────────────────────────────────
-@bot.event
-async def on_member_join(member):
-    guild_id = str(member.guild.id)
-    if guild_id in willkommen_kanal:
-        kanal = bot.get_channel(willkommen_kanal[guild_id])
-        if kanal:
-            embed = discord.Embed(
-                title=f"👋 Willkommen, {member.display_name}!",
-                description=f"Schön dass du auf **{member.guild.name}** bist!\nDu bist Mitglied **#{member.guild.member_count}**.",
-                color=FARBE_ERFOLG
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            await kanal.send(content=member.mention, embed=embed)
-
+# ─── EVENTS ────────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    print(f"✅ Bot ist online als {bot.user}")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="!hilfe"))
+    print(f"🤖 Maximale System-Architektur aktiv. Eingeloggt als: {bot.user}")
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/hilfe"))
 
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author.bot or not message.guild: 
         return
-
-    inhalt = message.content
+        
     user_id = str(message.author.id)
-    user_name = message.author.display_name
-    avatar_url = message.author.display_avatar.url
+    u = state.get_user(user_id)
+    
+    # Text-Validierung & Passives Wirtschaftssystem
+    if len(message.content) > 3 and not message.content.startswith("/"):
+        # Haustier-Hunger dynamisch erhöhen
+        if user_id in state.pet_daten and random.random() < 0.15:
+            p = state.pet_daten[user_id]
+            p.hunger = min(100, p.hunger + random.randint(2, 6))
 
-    # Standardmäßig 1 XP pro geschriebene Nachricht geben (Spam-Schutz: Nachricht muss länger als 3 Zeichen sein)
-    if len(inhalt) > 3 and not inhalt.startswith("!"):
-        if xp_geben(user_id, random.randint(1, 3)):
-            await message.channel.send(f"🎉 **GG** {message.author.mention}, du bist auf **Level {levels[user_id]['level']}** aufgestiegen!")
-
-    # ── Hangman: Buchstabe raten ──────────────────────────
-    if user_id in hangman_spiele and len(inhalt) == 1 and inhalt.isalpha():
-        spiel = hangman_spiele[user_id]
-        b = inhalt.lower()
-        if b in spiel["geraten"]:
-            await message.reply(embed=discord.Embed(description=f"❗ **{b}** hast du schon versucht!", color=FARBE_SPIEL))
-            return
-        spiel["geraten"].append(b)
-        if b not in spiel["wort"]:
-            spiel["falsch"] += 1
-        angezeigt = " ".join(c if c in spiel["geraten"] else "_" for c in spiel["wort"])
-        falsch = [c for c in spiel["geraten"] if c not in spiel["wort"]]
-        if "_" not in angezeigt:
-            del hangman_spiele[user_id]
-            xp_geben(user_id, 30)
-            await message.reply(embed=discord.Embed(title="🎉 Gewonnen!", description=f"Das Wort war: **{spiel['wort']}**\n+30 XP!", color=FARBE_ERFOLG))
-        elif spiel["falsch"] >= 6:
-            del hangman_spiele[user_id]
-            await message.reply(embed=discord.Embed(title="💀 Verloren!", description=f"{HANGMAN_BILDER[6]}\nDas Wort war: **{spiel['wort']}**", color=FARBE_FEHLER))
-        else:
-            embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[spiel['falsch']]}\n`{angezeigt}`", color=FARBE_SPIEL)
-            embed.add_field(name="Falsch", value=" ".join(falsch) or "—", inline=True)
-            embed.add_field(name="Übrig", value=str(6-spiel["falsch"]), inline=True)
-            await message.reply(embed=embed)
-        return
-
-    # ── Quiz: Antwort ─────────────────────────────────────
-    if user_id in quiz_spiele and inhalt.upper() in ["A","B","C","D"]:
-        spiel = quiz_spiele.pop(user_id)
-        if inhalt.upper() == spiel["richtig"]:
-            xp_geben(user_id, 15)
-            await message.reply(embed=discord.Embed(description="✅ **Richtig!** +15 XP ⭐", color=FARBE_ERFOLG))
-        else:
-            await message.reply(embed=discord.Embed(description=f"❌ **Falsch!** Richtige Antwort: **{spiel['richtig']}**", color=FARBE_FEHLER))
-        return
-
-    # ── Zahlenraten: Tipp ────────────────────────────────
-    if user_id in rate_spiel and inhalt.strip().lstrip("-").isdigit():
-        tipp = int(inhalt.strip())
-        ziel = rate_spiel[user_id]["zahl"]
-        rate_spiel[user_id]["versuche"] += 1
-        if tipp == ziel:
-            v = rate_spiel[user_id]["versuche"]
-            del rate_spiel[user_id]
-            xp_geben(user_id, 20)
-            await message.reply(embed=discord.Embed(title="🎉 Richtig!", description=f"Die Zahl war **{ziel}**!\n{v} Versuche · +20 XP", color=FARBE_ERFOLG))
-        elif tipp < ziel:
-            await message.add_reaction("📈")
-        else:
-            await message.add_reaction("📉")
-        return
-
-    # ── TicTacToe: Zug ───────────────────────────────────
-    if inhalt.strip().isdigit() and 1 <= int(inhalt.strip()) <= 9:
-        for sid, s in list(tictactoe_spiele.items()):
-            if s["spieler"][s["aktuell"]].id == message.author.id:
-                pos = int(inhalt.strip()) - 1
-                if s["brett"][pos] != " ":
-                    await message.reply(embed=fehler_embed("Dieses Feld ist schon belegt!"))
-                    return
-                s["brett"][pos] = s["zeichen"][s["aktuell"]]
-                brett = s["brett"]
-                gewinn = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
-                gewinner = None
-                for a,b,c in gewinn:
-                    if brett[a] == brett[b] == brett[c] != " ":
-                        gewinner = s["spieler"][s["aktuell"]]
-                brett_text = (f"`{brett[0]}|{brett[1]}|{brett[2]}`\n"
-                              f"`{brett[3]}|{brett[4]}|{brett[5]}`\n"
-                              f"`{brett[6]}|{brett[7]}|{brett[8]}`").replace(" ","⬜")
-                if gewinner:
-                    del tictactoe_spiele[sid]
-                    xp_geben(str(gewinner.id), 25)
-                    await message.channel.send(embed=discord.Embed(title=f"🎉 {gewinner.display_name} gewinnt!", description=brett_text, color=FARBE_ERFOLG))
-                elif " " not in brett:
-                    del tictactoe_spiele[sid]
-                    await message.channel.send(embed=discord.Embed(title="🤝 Unentschieden!", description=brett_text, color=FARBE_INFO))
-                else:
-                    s["aktuell"] = 1 - s["aktuell"]
-                    naechster = s["spieler"][s["aktuell"]]
-                    embed = discord.Embed(title="❌⭕ TicTacToe", description=brett_text, color=FARBE_SPIEL)
-                    embed.add_field(name="Am Zug", value=f"{s['zeichen'][s['aktuell']]} {naechster.mention}")
-                    await message.channel.send(embed=embed)
-                return
-
-    # ════════════════ BEFEHLE ════════════════════════════
-
-    # ── !ki ──────────────────────────────────────────────
-    if inhalt.startswith("!ki "):
-        frage = inhalt[4:]
-        async with message.channel.typing():
-            try:
-                if user_id not in chat_verlaeufe:
-                    chat_verlaeufe[user_id] = []
-                chat_verlaeufe[user_id].append({"role":"user","content":frage})
-                if len(chat_verlaeufe[user_id]) > 20:
-                    chat_verlaeufe[user_id] = chat_verlaeufe[user_id][-20:]
-                p = persoenlichkeit.get(user_id, "standard")
-                sys = PERSONAS[p]
-                if user_id in merkliste and merkliste[user_id]:
-                    sys += f" Infos über den User: {'; '.join(merkliste[user_id])}."
-                msgs = [{"role":"system","content":sys}] + chat_verlaeufe[user_id]
-                antwort = await groq_anfrage(msgs)
-                chat_verlaeufe[user_id].append({"role":"assistant","content":antwort})
-                if len(antwort) > 4000:
-                    antwort = antwort[:3997] + "..."
-                aufgestiegen = xp_geben(user_id, 5)
-                pi = PERSONA_INFO[p]
-                embed = discord.Embed(description=antwort, color=pi["farbe"])
-                embed.set_author(name=f"{pi['emoji']} {pi['name']}", icon_url=bot.user.display_avatar.url)
-                embed.set_footer(text=f"Gefragt von {user_name} · +5 XP" + (" · 🎉 LEVEL UP!" if aufgestiegen else ""), icon_url=avatar_url)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
-
-    # ── !persönlichkeit ───────────────────────────────────
-    elif inhalt.startswith("!persönlichkeit"):
-        t = inhalt.split(" ")
-        if len(t) < 2:
-            embed = discord.Embed(title="🎭 Persönlichkeiten", color=FARBE_INFO)
-            for k,v in PERSONA_INFO.items():
-                embed.add_field(name=f"{v['emoji']} {v['name']}", value=f"`!persönlichkeit {k}`", inline=True)
-            await message.reply(embed=embed)
-        elif t[1].lower() in PERSONAS:
-            w = t[1].lower()
-            persoenlichkeit[user_id] = w
-            pi = PERSONA_INFO[w]
-            begruess = {"anwalt":"Wie kann ich Ihnen helfen?","mädel":"Heyyy! 😊✨","lehrer":"Guten Tag!","pirat":"Arrr! Landratte!","standard":"Bereit!"}
-            await message.reply(discord.Embed(title=f"{pi['emoji']} {pi['name']}", description=begruess[w], color=pi["farbe"]))
-        else:
-            await message.reply(embed=fehler_embed("Unbekannt! Nutze `!persönlichkeit` für die Liste."))
-
-    # ── !merke ────────────────────────────────────────────
-    elif inhalt.startswith("!merke "):
-        info = inhalt[7:]
-        if user_id not in merkliste: merkliste[user_id] = []
-        merkliste[user_id].append(info)
-        await message.reply(embed=discord.Embed(description=f"🧠 Gemerkt: *{info}*", color=FARBE_ERFOLG))
-
-    elif inhalt == "!merkliste":
-        if user_id in merkliste and merkliste[user_id]:
-            embed = discord.Embed(title="🧠 Meine Notizen über dich", description="\n".join(f"• {x}" for x in merkliste[user_id]), color=FARBE_INFO)
-            embed.set_thumbnail(url=avatar_url)
-            await message.reply(embed=embed)
-        else:
-            await message.reply(embed=discord.Embed(description="🧠 Noch nichts gemerkt! Nutze `!merke [info]`", color=FARBE_INFO))
-
-    elif inhalt == "!vergiss":
-        merkliste[user_id] = []
-        await message.reply(embed=discord.Embed(description="🗑️ Alles vergessen!", color=FARBE_ERFOLG))
-
-    # ── !rank (NEU AUSGEBAUT) ──────────────────────────────
-    elif inhalt.startswith("!rank"):
-        ziel = message.mentions[0] if message.mentions else message.author
-        z_id = str(ziel.id)
+        # XP-Generierung
+        if xp_geben(user_id, random.randint(2, 5)):
+            msg_text = f"🎉 **GG** {message.author.mention}, du hast **Level {u.level}** erreicht!"
+            erhaltene_rolle = await pruefe_und_gebe_level_rolle(message.author, u.level)
+            if erhaltene_rolle:
+                msg_text += f"\n🏅 Rolle freigeschaltet: **{erhaltene_rolle}**"
+            await message.channel.send(embed=erstelle_embed("Level Aufstieg!", msg_text, BotFarben.ERFOLG))
         
-        if z_id not in levels:
-            levels[z_id] = {"xp": 0, "level": 1, "gesamt_xp": 0}
-            
-        u_data = levels[z_id]
-        lvl = u_data["level"]
-        xp = u_data["xp"]
-        benoetigt = lvl * 100
-        prozent = int((xp / benoetigt) * 10)
-        fortschrittsbalken = "🟩" * prozent + "⬛" * (10 - prozent)
+        # Passive Münzen
+        if random.random() < 0.25:
+            u.muenzen += random.randint(2, 7)
+            # ─── SLASHE-COMMANDS: HILFE & PROFIL ───────────────────────
+@bot.tree.command(name="hilfe", description="Zeigt das hochentwickelte Navigationsmenü für alle Module.")
+async def hilfe(interaction: discord.Interaction):
+    embed = discord.Embed(title="⚙️ Zentrales Befehls-Terminal", color=BotFarben.INFO)
+    embed.add_field(name="💰 Wirtschaft & Progression", value="`/rank` · `/leaderboard` · `/daily` · `/money` · `/coinflip` · `/shop` · `/buy` · `/inventory`", inline=False)
+    embed.add_field(name="💞 Soziales & Interaktion", value="`/ship` · `/marry` · `/divorce` · `/marry-status`", inline=False)
+    embed.add_field(name="🐾 Bio-Gefährten (Pets)", value="`/pet-adopt` · `/pet-status` · `/pet-feed` · `/pet-love`", inline=False)
+    embed.add_field(name="🤖 KI & Werkzeuge", value="`/ki` · `/persönlichkeit` · `/todo` · `/passwort` · `/wurf`", inline=False)
+    embed.set_footer(text="Profisystem v2.4 · Entwickelt mit discord.py")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="rank", description="Zeigt statistische Werte deines Serverprofils.")
+async def rank(interaction: discord.Interaction, user: discord.Member = None):
+    ziel = user if user else interaction.user
+    u = state.get_user(str(ziel.id))
+    benoetigt = u.level * 100
+    
+    beschreibung = f"Fortschritt: **{u.xp} / {benoetigt} XP**\nGesamt-Erfahrung: `{u.gesamt_xp} XP`"
+    embed = erstelle_embed(f"⭐ Profil von {ziel.display_name}", beschreibung, BotFarben.INFO)
+    embed.add_field(name="Aktuelles Level", value=f"**`Level {u.level}`**", inline=True)
+    embed.add_field(name="Finanzen", value=f"**`🪙 {u.muenzen} Münzen`**", inline=True)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="leaderboard", description="Listet die aktivsten User des Servers.")
+async def leaderboard(interaction: discord.Interaction):
+    sortiert = sorted(state.user_daten.items(), key=lambda x: x[1].gesamt_xp, reverse=True)[:5]
+    if not sortiert:
+        return await interaction.response.send_message(embed=fehler_embed("Noch keine Daten auf diesem Server vorhanden."))
         
-        embed = discord.Embed(title=f"⭐ Rangkarte von {ziel.display_name}", color=FARBE_INFO)
-        embed.set_thumbnail(url=ziel.display_avatar.url)
-        embed.add_field(name="Level", value=f"**{lvl}**", inline=True)
-        embed.add_field(name="XP", value=f"`{xp} / {benoetigt}` (Gesamt: {u_data['gesamt_xp']})", inline=True)
-        embed.add_field(name="Fortschritt", value=f"{fortschrittsbalken} ({int((xp/benoetigt)*100)}%)", inline=False)
-        await message.reply(embed=embed)
+    t = "\n".join(f"**#{i+1}** · <@{uid}> · Level `{d.level}` *({d.gesamt_xp} Gesamt-XP)*" for i, (uid, d) in enumerate(sortiert))
+    await interaction.response.send_message(embed=erstelle_embed("🏆 Top 5 globale Server-Rangliste", t, BotFarben.SPIEL))
 
-    # ── !leaderboard (NEU AUSGEBAUT) ───────────────────────
-    elif inhalt == "!leaderboard":
-        if not levels:
-            await message.reply(embed=discord.Embed(description="Es wurden noch keine XP gesammelt!", color=FARBE_INFO))
-            return
-            
-        # Nach Gesamt-XP sortieren
-        sortiert = sorted(levels.items(), key=lambda x: x[1]["gesamt_xp"], reverse=True)[:10]
-        text_liste = []
+# ─── MARKTPLATZ-LOGIK ──────────────────────────────────────
+@bot.tree.command(name="shop", description="Zeigt verfügbare Gegenstände im Server-Shop.")
+async def shop(interaction: discord.Interaction):
+    embed = erstelle_embed("🛒 Globaler Server-Marktplatz", "Nutze den Befehl `/buy`, um Gegenstände zu erwerben.", BotFarben.WIRTSCHAFT)
+    for item_id, info in SHOP_ITEMS.items():
+        embed.add_field(
+            name=f"{info['name']} *(ID: `{item_id}`)*", 
+            value=f"Preis: **{info['preis']} Münzen**\n*{info['beschreibung']}*", 
+            inline=False
+        )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="buy", description="Kaufe ein Item aus dem Laden.")
+@app_commands.choices(item_id=[
+    app_commands.Choice(name="🍪 Kekse (25 Münzen)", value="kekse"),
+    app_commands.Choice(name="🥩 Premium Steak (60 Münzen)", value="steak"),
+    app_commands.Choice(name="⚡ XP-Booster (150 Münzen)", value="booster"),
+    app_commands.Choice(name="🍀 Glücksbringer (300 Münzen)", value="gluecksbringer")
+])
+async def buy(interaction: discord.Interaction, item_id: app_commands.Choice[str]):
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    item_daten = SHOP_ITEMS[item_id.value]
+    
+    if u.muenzen < item_daten["preis"]:
+        return await interaction.response.send_message(embed=fehler_embed(f"Finanzierung abgelehnt. Du benötigst **{item_daten['preis']} Münzen** (Aktuell: {u.muenzen})."), ephemeral=True)
         
-        for i, (uid, daten) in enumerate(sortiert):
-            try:
-                u_obj = await message.guild.fetch_member(int(uid))
-                u_name = u_obj.display_name
-            except Exception:
-                u_name = f"Unbekannter User ({uid})"
-                
-            platz_emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"**#{i+1}**"
-            text_liste.append(f"{platz_emoji} {u_name} · Level {daten['level']} ({daten['gesamt_xp']} Gesamt-XP)")
+    u.muenzen -= item_daten["preis"]
+    u.inventar[item_id.value] = u.inventar.get(item_id.value, 0) + 1
+    
+    # Sonderlogik für Direktverzehr (z.B. XP Booster)
+    if item_id.value == "booster":
+        u.inventar["booster"] -= 1
+        xp_geben(u_id, 200)
+        state.speichern()
+        return await interaction.response.send_message(embed=erstelle_embed("⚡ Spezial-Item aktiviert", f"Du hast **{item_daten['name']}** gekauft. Die 200 XP wurden direkt auf dein Konto gutgeschrieben!", BotFarben.ERFOLG))
+
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🛍️ Transaktion erfolgreich", f"Du hast **{item_daten['name']}** für **{item_daten['preis']} Münzen** erworben.\nDas Item befindet sich in deinem `/inventory`.", BotFarben.ERFOLG))
+
+@bot.tree.command(name="inventory", description="Zeigt deine gesammelten Gegenstände.")
+async def inventory(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    aktiv = [f"{SHOP_ITEMS[iid]['name']}: **{anzahl}x**" for iid, anzahl in u.inventar.items() if anzahl > 0]
+    
+    beschreibung = "\n".join(aktiv) if aktiv else "*Dein Rucksack ist komplett leer.*"
+    await interaction.response.send_message(embed=erstelle_embed("🎒 Dein persönliches Inventar", beschreibung, BotFarben.TOOL))
+
+# ─── HAUSTIER (PET) MANAGMENT ──────────────────────────────
+@bot.tree.command(name="pet-adopt", description="Adoptiert einen biologischen Gefährten.")
+@app_commands.choices(typ=[app_commands.Choice(name="🐱 Katze", value="Katze"), app_commands.Choice(name="🐶 Hund", value="Hund"), app_commands.Choice(name="🐉 Drache", value="Drache")])
+async def pet_adopt(interaction: discord.Interaction, typ: app_commands.Choice[str], name: str):
+    u_id = str(interaction.user.id)
+    if u_id in state.pet_daten:
+        return await interaction.response.send_message(embed=fehler_embed("Du besitzt bereits ein Haustier. Du kannst kein weiteres adoptieren."), ephemeral=True)
+        
+    if len(name) > 16:
+        return await interaction.response.send_message(embed=fehler_embed("Der Tiername darf maximal 16 Zeichen lang sein."), ephemeral=True)
+
+    state.pet_daten[u_id] = PetProfile(name=name, typ=typ.value)
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🐾 Adoption abgeschlossen", f"Herzlichen Glückwunsch! Du hast deinen Gefährten **{name}** ({typ.value}) erfolgreich registriert!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="pet-status", description="Prüft die Vitalwerte deines Haustiers.")
+async def pet_status(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    if u_id not in state.pet_daten:
+        return await interaction.response.send_message(embed=fehler_embed("Es konnte kein registriertes Haustier für dich gefunden werden."), ephemeral=True)
+        
+    p = state.pet_daten[u_id]
+    status_balken = "🟢 Gesund" if p.hunger < 50 else ("🟡 Hungrig" if p.hunger < 85 else "🔴 Kritisch / Verweigert Arbeit")
+    
+    embed = erstelle_embed(f"🐾 Gefährten-Status: {p.name}", f"Spezies: **{p.typ}**\nStatus: **{status_balken}**", BotFarben.INFO)
+    embed.add_field(name="Tier-Level", value=f"`Lvl {p.level}`", inline=True)
+    embed.add_field(name="Hunger-Index", value=f"`{p.hunger} / 100`", inline=True)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="pet-feed", description="Füttere dein Haustier mit Items aus deinem Inventar.")
+@app_commands.choices(futter_typ=[app_commands.Choice(name="🍪 Kekse benutzen", value="kekse"), app_commands.Choice(name="🥩 Premium Steak benutzen", value="steak")])
+async def pet_feed(interaction: discord.Interaction, futter_typ: app_commands.Choice[str]):
+    u_id = str(interaction.user.id)
+    if u_id not in state.pet_daten:
+        return await interaction.response.send_message(embed=fehler_embed("Du musst erst ein Tier adoptieren."), ephemeral=True)
+        
+    u = state.get_user(u_id)
+    if u.inventar.get(futter_typ.value, 0) <= 0:
+        return await interaction.response.send_message(embed=fehler_embed(f"Du besitzt kein(e) {futter_typ.name} im Inventar. Besuche den `/shop`."), ephemeral=True)
+
+    u.inventar[futter_typ.value] -= 1
+    p = state.pet_daten[u_id]
+    
+    wert = 30 if futter_typ.value == "kekse" else 80
+    p.hunger = max(0, p.hunger - wert)
+    p.level += 1
+    state.speichern()
+    
+    await interaction.response.send_message(embed=erstelle_embed("🍖 Fütterung durchgeführt", f"Du hast **{p.name}** gefüttert.\nHunger fällt auf **{p.hunger}/100**. Das Tier steigt auf **Level {p.level}**!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="pet-love", description="Kuschel mit deinem Tier für Zuneigungs-XP.")
+async def pet_love(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    if u_id not in state.pet_daten:
+        return await interaction.response.send_message(embed=fehler_embed("Du besitzt kein Haustier."), ephemeral=True)
+        
+    p = state.pet_daten[u_id]
+    if p.hunger >= 90:
+        return await interaction.response.send_message(embed=fehler_embed(f"**{p.name}** ist zu hungrig ({p.hunger}/100) und lässt dich nicht an sich heran. Füttere es!"), ephemeral=True)
+        
+    jetzt = datetime.now(timezone.utc)
+    if p.letztes_streicheln:
+        last_time = datetime.fromisoformat(p.letztes_streicheln)
+        if jetzt < last_time + timedelta(hours=1):
+            restzeit = (last_time + timedelta(hours=1)) - jetzt
+            return await interaction.response.send_message(embed=fehler_embed(f"Dein Tier schläft noch. Bitte warte noch `{int(restzeit.seconds // 60)} Minuten`."), ephemeral=True)
             
-        embed = discord.Embed(title="🏆 XP Leaderboard (Top 10)", description="\n".join(text_liste), color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+    p.letztes_streicheln = jetzt.isoformat()
+    xp_geben(u_id, 35)
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("❤️ Zuneigung erwidert", f"Du hast **{p.name}** intensiv gekuschelt. Das stärkt eure Bindung! *(+35 User-XP)*", BotFarben.ERFOLG))
+    # ─── WIRTSCHAFTS-MINIGAMES ─────────────────────────────────
+@bot.tree.command(name="money", description="Gibt Auskunft über dein Erspartes.")
+async def money(interaction: discord.Interaction, user: discord.Member = None):
+    ziel = user if user else interaction.user
+    u = state.get_user(str(ziel.id))
+    await interaction.response.send_message(embed=erstelle_embed("🪙 Kontostand", f"Der User **{ziel.display_name}** besitzt aktuell **{u.muenzen} Münzen**.", BotFarben.WIRTSCHAFT))
 
-    # ── !xp-geben (NEU AUSGEBAUT) ──────────────────────────
-    elif inhalt.startswith("!xp-geben "):
-        if not message.author.guild_permissions.administrator:
-            await message.reply(embed=fehler_embed("Du benötigst Administrator-Rechte, um XP zu vergeben!"))
-            return
+@bot.tree.command(name="daily", description="Sichert dir tägliche Ressourcen.")
+async def daily(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    jetzt = datetime.now(timezone.utc)
+    
+    if u.letztes_daily:
+        last_daily = datetime.fromisoformat(u.letztes_daily)
+        if jetzt < last_daily + timedelta(days=1):
+            verbleibend = (last_daily + timedelta(days=1)) - jetzt
+            stunden = int(verbleibend.seconds // 3600)
+            minuten = int((verbleibend.seconds % 3600) // 60)
+            return await interaction.response.send_message(embed=fehler_embed(f"Du hast deine Belohnung bereits beansprucht. Warte noch `{stunden} Std. {minuten} Min.`"), ephemeral=True)
             
-        t = inhalt.split(" ")
-        if len(t) < 3 or not message.mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!xp-geben @user [menge]`"))
-            return
+    u.letztes_daily = jetzt.isoformat()
+    xp_geben(u_id, 150)
+    u.muenzen += 50
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎁 Tagesbonus abgeholt", "Du hast deine tägliche Versorgung erhalten:\n**+150 XP**\n**+50 Münzen**", BotFarben.ERFOLG))
+
+@bot.tree.command(name="coinflip", description="Riskiere Münzen beim Münzwurf.")
+@app_commands.choices(seite=[app_commands.Choice(name="Kopf", value="Kopf"), app_commands.Choice(name="Zahl", value="Zahl")])
+async def coinflip(interaction: discord.Interaction, einsatz: int, seite: app_commands.Choice[str]):
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    
+    if einsatz <= 0:
+        return await interaction.response.send_message(embed=fehler_embed("Der Einsatz muss mindestens 1 Münze betragen."), ephemeral=True)
+    if u.muenzen < einsatz:
+        return await interaction.response.send_message(embed=fehler_embed("Unzureichende Liquidität auf deinem Konto für diesen Einsatz."), ephemeral=True)
+        
+    # Passiver Bonus durch Glücksbringer-Item aus dem Shop
+    chance_gewinn = 0.50
+    if u.inventar.get("gluecksbringer", 0) > 0:
+        chance_gewinn = 0.55  # 5% höhere Gewinnchance
+
+    ergebnis = seite.value if random.random() < chance_gewinn else ("Zahl" if seite.value == "Kopf" else "Kopf")
+    
+    if ergebnis == seite.value:
+        u.muenzen += einsatz
+        state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("🎉 Gewinn!", f"Die Münze zeigt **{ergebnis}**. Du gewinnst **{einsatz} Münzen**!", BotFarben.ERFOLG))
+    else:
+        u.muenzen -= einsatz
+        state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("😢 Verlust!", f"Die Münze fiel auf **{ergebnis}**. Du verlierst **{einsatz} Münzen**.", BotFarben.FEHLER))
+
+# ─── NEURONALE KI SCHNITTTSTELLE (GROQ) ─────────────────────
+@bot.tree.command(name="ki", description="Sendet eine Anfrage an das neuronale KI-Netz.")
+async def ki(interaction: discord.Interaction, frage: str):
+    await interaction.response.defer()
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    
+    try:
+        if u_id not in state.chat_verlaeufe:
+            state.chat_verlaeufe[u_id] = []
             
-        ziel = message.mentions[0]
-        try:
-            menge = int(t[2]) if t[2].isdigit() else int(t[1])
-        except Exception:
-            menge = 0
+        state.chat_verlaeufe[u_id].append({"role": "user", "content": frage})
+        
+        # System-Instruktionen zusammenbauen
+        sys_prompt = PERSONAS.get(u.ki_persona, "standard")
+        if u.todo:
+            sys_prompt += f" Merkliste/ToDos des Users: {'; '.join(u.todo)}."
             
-        if menge <= 0:
-            await message.reply(embed=fehler_embed("Bitte gib eine gültige Zahl größer als 0 ein."))
-            return
-            
-        level_up = xp_geben(str(ziel.id), menge)
-        embed = discord.Embed(description=f"✅ {message.author.mention} hat {ziel.mention} **{menge} XP** gegeben!", color=FARBE_ERFOLG)
-        await message.reply(embed=embed)
-        if level_up:
-            await message.channel.send(f"🎉 {ziel.mention} hat durch das Geschenk ein **Level-Up** auf Level **{levels[str(ziel.id)]['level']}** erreicht!")
+        # Begrenzung auf die letzten 8 Nachrichten für Kontext-Erhalt
+        kontext = [{"role": "system", "content": sys_prompt}] + state.chat_verlaeufe[u_id][-8:]
+        
+        antwort = await groq_anfrage(kontext)
+        state.chat_verlaeufe[u_id].append({"role": "assistant", "content": antwort})
+        
+        await interaction.followup.send(embed=erstelle_embed("🤖 KI-Rückmeldung", antwort[:2000], BotFarben.KI))
+    except Exception as e:
+        await interaction.followup.send(embed=fehler_embed(f"Fehler bei der KI-Verarbeitung: {str(e)}"))
 
-    # ── !übersetzen ───────────────────────────────────────
-    elif inhalt.startswith("!übersetzen "):
-        text = inhalt[12:]
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Übersetze NUR auf Englisch, keine Erklärung."},{"role":"user","content":text}], modell="llama-3.1-8b-instant", max_tokens=500)
-                embed = discord.Embed(title="🌍 Übersetzung", color=FARBE_TOOL)
-                embed.add_field(name="Original", value=text, inline=False)
-                embed.add_field(name="Englisch", value=antwort, inline=False)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+@bot.tree.command(name="persönlichkeit", description="Ändert das Profilverhalten der KI.")
+@app_commands.choices(wahl=[
+    app_commands.Choice(name="Standard", value="standard"), 
+    app_commands.Choice(name="Pirat 🏴‍☠️", value="pirat"), 
+    app_commands.Choice(name="Anwalt ⚖️", value="anwalt"),
+    app_commands.Choice(name="Lehrer 🎓", value="lehrer")
+])
+async def persoenlichkeit_cmd(interaction: discord.Interaction, wahl: app_commands.Choice[str]):
+    u = state.get_user(str(interaction.user.id))
+    u.ki_persona = wahl.value
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎭 Persona konfiguriert", f"Das KI-Verhaltensprofil wurde auf **{wahl.name}** umgestellt.", BotFarben.TOOL))
 
-    # ── !zusammenfassen ───────────────────────────────────
-    elif inhalt.startswith("!zusammenfassen "):
-        text = inhalt[16:]
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Fasse kurz zusammen."},{"role":"user","content":text}], modell="llama-3.1-8b-instant", max_tokens=500)
-                await message.reply(embed=discord.Embed(title="📝 Zusammenfassung", description=antwort, color=FARBE_TOOL))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+# ─── INTERAKTION & SOCIALS ─────────────────────────────────
+@bot.tree.command(name="ship", description="Berechnet die Kompatibilität basierend auf Serverrollen.")
+async def ship(interaction: discord.Interaction, user1: discord.Member, user2: discord.Member = None):
+    u1, u2 = user1, (user2 if user2 else interaction.user)
+    
+    if u1 == u2:
+        return await interaction.response.send_message(embed=fehler_embed("Selbst-Shippen ist mathematisch ineffizient."), ephemeral=True)
 
-    # ── !geschichte ───────────────────────────────────────
-    elif inhalt.startswith("!geschichte "):
-        thema = inhalt[12:]
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Schreibe eine kurze kreative Geschichte (max 150 Wörter) auf Deutsch."},{"role":"user","content":thema}], max_tokens=400)
-                await message.reply(embed=discord.Embed(title=f"📖 {thema}", description=antwort, color=0x8E44AD))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+    # Rollenbasierte Validierung
+    u1_rollen = [r.name for r in u1.roles]
+    u2_rollen = [r.name for r in u2.roles]
+    
+    g1 = "divers" if "Divers" in u1_rollen else ("männlich" if "Männlich" in u1_rollen else ("weiblich" if "Weiblich" in u1_rollen else None))
+    g2 = "divers" if "Divers" in u2_rollen else ("männlich" if "Männlich" in u2_rollen else ("weiblich" if "Weiblich" in u2_rollen else None))
 
-    # ── !reim ─────────────────────────────────────────────
-    elif inhalt.startswith("!reim "):
-        thema = inhalt[6:]
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Schreibe ein lustiges 4-zeiliges Gedicht auf Deutsch."},{"role":"user","content":thema}], modell="llama-3.1-8b-instant", max_tokens=200)
-                await message.reply(embed=discord.Embed(title=f"🎤 Reim: {thema}", description=antwort, color=0x8E44AD))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+    if not g1 or not g2:
+        return await interaction.response.send_message(embed=fehler_embed("Rollen-Validierung fehlgeschlagen. Einer der User hat keine Geschlechtsrolle ('Männlich', 'Weiblich', 'Divers')."), ephemeral=True)
 
-    # ── !witz ─────────────────────────────────────────────
-    elif inhalt == "!witz":
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Erzähle einen kurzen Witz auf Deutsch. Nur den Witz."},{"role":"user","content":"Witz"}], modell="llama-3.1-8b-instant", max_tokens=200)
-                await message.reply(embed=discord.Embed(title="😂 Witz", description=antwort, color=FARBE_SPIEL))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+    if not (g1 == "divers" or g2 == "divers" or g1 != g2):
+        return await interaction.response.send_message(embed=fehler_embed("Kombinationsregel-Konflikt: Paarung blockiert nach Server-Vorgabe."), ephemeral=True)
 
-    # ── !zitat ────────────────────────────────────────────
-    elif inhalt == "!zitat":
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Gib ein motivierendes Zitat auf Deutsch. Format: 'Zitat' - Autor"},{"role":"user","content":"Zitat"}], modell="llama-3.1-8b-instant", max_tokens=150)
-                await message.reply(embed=discord.Embed(title="💬 Zitat", description=f"*{antwort}*", color=0xF39C12))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+    random.seed((u1.id + u2.id))
+    p = random.randint(0, 100)
+    random.seed()
+    
+    balken = "❤️" * (p // 10) + "🖤" * (10 - (p // 10))
+    await interaction.response.send_message(embed=erstelle_embed("💘 Partnerprüfung abgeschlossen", f"**{u1.display_name}** ({g1}) & **{u2.display_name}** ({g2})\n\n{balken}\n\nKompatibilität: **{p}%**", BotFarben.TOOL))
 
-    # ── !fakt ─────────────────────────────────────────────
-    elif inhalt == "!fakt":
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":"Gib einen überraschenden Fakt auf Deutsch. Nur den Fakt."},{"role":"user","content":"Fakt"}], modell="llama-3.1-8b-instant", max_tokens=150)
-                await message.reply(embed=discord.Embed(title="💡 Wusstest du schon?", description=antwort, color=0x1ABC9C))
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+@bot.tree.command(name="marry", description="Sendet einen formellen Hochzeitsantrag.")
+async def marry(interaction: discord.Interaction, partner: discord.Member):
+    u_id, p_id = str(interaction.user.id), str(partner.id)
+    u = state.get_user(u_id)
+    
+    if u.partner_id or partner.bot or partner == interaction.user:
+        return await interaction.response.send_message(embed=fehler_embed("Heiratsantrag ungültig (Du bist bereits verheiratet, der User ist ein Bot oder du selbst)."), ephemeral=True)
 
-    # ── !kompliment ───────────────────────────────────────
-    elif inhalt == "!kompliment":
-        async with message.channel.typing():
-            try:
-                antwort = await groq_anfrage([{"role":"system","content":f"Gib ein herzliches Kompliment auf Deutsch an {user_name}. Nur das Kompliment."},{"role":"user","content":"Kompliment"}], modell="llama-3.1-8b-instant", max_tokens=100)
-                embed = discord.Embed(description=f"💖 {antwort}", color=0xFF6B9D)
-                embed.set_thumbnail(url=avatar_url)
-                await message.reply(embed=embed)
-            except Exception as e:
-                await message.reply(embed=fehler_embed(repr(e)))
+    await interaction.response.send_message(f"💍 {partner.mention}, nimm den Antrag von {interaction.user.mention} an, indem du exakt innerhalb 60 Sekunden **'ja ich will'** in den Chat schreibst!")
+    
+    try:
+        def check(m): return m.author.id == partner.id and m.content.lower() == "ja ich will" and m.channel.id == interaction.channel_id
+        await bot.wait_for("message", check=check, timeout=60.0)
+        
+        u.partner_id = p_id
+        state.get_user(p_id).partner_id = u_id
+        state.speichern()
+        await interaction.channel.send(embed=erstelle_embed("🎉 Bund der Ehe geschlossen!", f"{interaction.user.mention} und {partner.mention} sind nun offiziell verheiratet!", BotFarben.ERFOLG))
+    except asyncio.TimeoutError:
+        await interaction.channel.send(embed=erstelle_embed("💔 Antrag abgelaufen", "Die Frist verstrich ohne rechtsgültige Zustimmung.", BotFarben.FEHLER))
 
-    # ── !rechne ───────────────────────────────────────────
-    elif inhalt.startswith("!rechne "):
-        text = inhalt[8:]
-        try:
-            if all(c in "0123456789+-*/(). " for c in text):
-                ergebnis = eval(text)
-                embed = discord.Embed(title="🧮 Rechner", color=FARBE_TOOL)
-                embed.add_field(name="Rechnung", value=f"`{text}`", inline=True)
-                embed.add_field(name="Ergebnis", value=f"**{ergebnis}**", inline=True)
-                await message.reply(embed=embed)
-            else:
-                await message.reply(embed=fehler_embed("Nur Zahlen und + - * / ( ) erlaubt!"))
-        except Exception:
-            await message.reply(embed=fehler_embed("Ungültige Rechnung!"))
+@bot.tree.command(name="divorce", description="Löst eine bestehende Ehe auf.")
+async def divorce(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    if not u.partner_id:
+        return await interaction.response.send_message(embed=fehler_embed("Du bist aktuell mit niemandem verheiratet."), ephemeral=True)
+        
+    p_id = u.partner_id
+    u.partner_id = None
+    state.get_user(p_id).partner_id = None
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("💔 Scheidung vollzogen", f"Die Bindung zu <@{p_id}> wurde mit sofortiger Wirkung aufgehoben.", BotFarben.FEHLER))
 
-    # ── !würfel ───────────────────────────────────────────
-    elif inhalt.startswith("!würfel"):
-        t = inhalt.split(" ")
-        seiten = int(t[1]) if len(t) > 1 and t[1].isdigit() else 6
-        await message.reply(embed=discord.Embed(title="🎲 Würfelwurf", description=f"# {random.randint(1,seiten)}\n(1-{seiten})", color=FARBE_SPIEL))
+@bot.tree.command(name="marry-status", description="Überprüft Beziehungsstrukturen.")
+async def marry_status(interaction: discord.Interaction, user: discord.Member = None):
+    z = user if user else interaction.user
+    u = state.get_user(str(z.id))
+    text = f"💍 Verheiratet mit: <@{u.partner_id}>" if u.partner_id else "🕊️ Beziehungsstatus: Single"
+    await interaction.response.send_message(embed=erstelle_embed(f"Herz-Status: {z.display_name}", text, BotFarben.INFO))
 
-    # ── !münze ────────────────────────────────────────────
-    elif inhalt == "!münze":
-        e, r = random.choice([("👑","Kopf"),("🔢","Zahl")])
-        await message.reply(embed=discord.Embed(title="🪙 Münzwurf", description=f"## {e} {r}", color=FARBE_SPIEL))
-
-    # ── !rate ─────────────────────────────────────────────
-    elif inhalt.startswith("!rate"):
-        t = inhalt.split(" ")
-        maxz = int(t[1]) if len(t) > 1 and t[1].isdigit() else 100
-        rate_spiel[user_id] = {"zahl": random.randint(1,maxz), "versuche": 0}
-        await message.reply(embed=discord.Embed(title="🔢 Zahlenraten", description=f"Ich denke an eine Zahl zwischen **1 und {maxz}**!\nSchreib eine Zahl um zu raten!", color=FARBE_SPIEL))
-
-    # ── !ssp ──────────────────────────────────────────────
-    elif inhalt.startswith("!ssp "):
-        w = inhalt[5:].strip().lower()
-        opt = {"schere":"✂️","stein":"🪨","papier":"📄"}
-        if w not in opt:
-            await message.reply(embed=fehler_embed("Nutze: `!ssp schere/stein/papier`"))
+# ─── UTILITIES & ALLGEMEINES ───────────────────────────────
+@bot.tree.command(name="todo", description="Einträge der Organisationsliste anpassen.")
+@app_commands.choices(mode=[app_commands.Choice(name="Anzeigen/Hinzufügen", value="show"), app_commands.Choice(name="Leeren", value="clear")])
+async def todo(interaction: discord.Interaction, mode: app_commands.Choice[str], text: str = None):
+    u = state.get_user(str(interaction.user.id))
+    if mode.value == "show":
+        if text:
+            if len(text) > 60: return await interaction.response.send_message(embed=fehler_embed("Text zu lang (Max. 60 Zeichen)."), ephemeral=True)
+            u.todo.append(text)
+            state.speichern()
+            await interaction.response.send_message(embed=erstelle_embed("📝 Notiz erfasst", f"Hinzugefügt: `{text}`", BotFarben.ERFOLG))
         else:
-            wb = random.choice(list(opt.keys()))
-            if w == wb:
-                r, f = "🤝 Unentschieden!", FARBE_INFO
-            elif (w=="schere" and wb=="papier") or (w=="stein" and wb=="schere") or (w=="papier" and wb=="stein"):
-                r, f = "🎉 Du gewinnst! +10 XP", FARBE_ERFOLG
-                xp_geben(user_id, 10)
-            else:
-                r, f = "😢 Du verlierst!", FARBE_FEHLER
-            embed = discord.Embed(title="✂️ Schere Stein Papier", color=f)
-            embed.add_field(name="Du", value=f"{opt[w]} {w}", inline=True)
-            embed.add_field(name="Bot", value=f"{opt[wb]} {wb}", inline=True)
-            embed.add_field(name="Ergebnis", value=r, inline=False)
-            await message.reply(embed=embed)
+            liste = "\n".join(f"• {x}" for x in u.todo) if u.todo else "*Keine aktiven Einträge.*"
+            await interaction.response.send_message(embed=erstelle_embed("📋 Deine To-Do Liste", liste, BotFarben.INFO))
+    else:
+        u.todo = []
+        state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("🗑️ Bereinigt", "Deine Liste wurde vollständig geleert.", BotFarben.FEHLER))
 
-    # ── !hangman ──────────────────────────────────────────
-    elif inhalt == "!hangman":
-        wort = random.choice(HANGMAN_WOERTER)
-        hangman_spiele[user_id] = {"wort": wort, "geraten": [], "falsch": 0}
-        angezeigt = " ".join("_" for _ in wort)
-        embed = discord.Embed(title="🎯 Hangman", description=f"{HANGMAN_BILDER[0]}\n`{angezeigt}`\n\nSchreibe einen Buchstaben!", color=FARBE_SPIEL)
-        await message.reply(embed=embed)
+@bot.tree.command(name="passwort", description="Gibt ein zufällig generiertes, sicheres Passwort aus.")
+async def passwort(interaction: discord.Interaction, laenge: int = 16):
+    laenge = min(max(laenge, 10), 32)
+    zeichen = string.ascii_letters + string.digits + "!@#$%^&*"
+    pw = "".join(random.choice(zeichen) for _ in range(laenge))
+    await interaction.response.send_message(f"🔐 **Dein generiertes Passwort:**\n||`{pw}`||\n*Nur für dich sichtbar. Gib dieses Passwort niemals weiter.*", ephemeral=True)
 
-    # ── !quiz ─────────────────────────────────────────────
-    elif inhalt == "!quiz":
-        frage = random.choice(QUIZ_FRAGEN)
-        quiz_spiele[user_id] = {"richtig": frage["richtig"]}
-        embed = discord.Embed(title="🧠 Quiz", description=f"**{frage['frage']}**\n\n" + "\n".join(frage["antworten"]), color=FARBE_INFO)
-        embed.set_footer(text="Antworte mit A, B, C oder D!")
-        await message.reply(embed=embed)
+@bot.tree.command(name="wurf", description="Simuliert ein mathematisches Würfelexperiment.")
+async def wurf(interaction: discord.Interaction, seiten: int = 6):
+    if seiten < 2: return await interaction.response.send_message(embed=fehler_embed("Ein Würfel benötigt mindestens 2 Seiten."), ephemeral=True)
+    await interaction.response.send_message(embed=erstelle_embed("🎲 Würfel gefallen", f"Ergebnis auf einem {seiten}-seitigen Würfel: **{random.randint(1, seiten)}**", BotFarben.SPIEL))
 
-    # ── !ttt ──────────────────────────────────────────────
-    elif inhalt.startswith("!ttt "):
-        if not message.mentions:
-            await message.reply(embed=fehler_embed("Nutze: `!ttt @user`"))
-        else:
-            gegner = message.mentions[0]
-            if gegner == message.author or gegner.bot:
-                await message.reply(embed=fehler_embed("Ungültiger Gegner!"))
-            else:
-                sid = f"{user_id}-{gegner.id}"
-                tictactoe_spiele[sid] = {"brett":[" "]*9,"spieler":[message.author,gegner],"aktuell":0,"zeichen":["❌","⭕"]}
-                embed = discord.Embed(title="❌⭕ TicTacToe", description="`1|2|3`\n`4|5|6`\n`7|8|9`", color=FARBE_SPIEL)
-                embed.add_field(name="Spieler", value=f"❌ {message.author.mention}\n⭕ {gegner.mention}")
-                embed.add_field(name="Am Zug", value=f"❌ {message.author.mention}")
-                embed.set_footer(text="Schreibe 1-9 um zu spielen!")
-                await message.channel.send(embed=embed)
+@bot.tree.command(name="avatar", description="Ruft die hochauflösende Grafikdatei eines Profils ab.")
+async def avatar(interaction: discord.Interaction, user: discord.Member = None):
+    z = user if user else interaction.user
+    embed = discord.Embed(title=f"🖼️ Avatar von {z.display_name}", color=BotFarben.INFO)
+    embed.set_image(url=z.display_avatar.url)
+    await interaction.response.send_message(embed=embed)
 
-    # ── !ship (JETZT MIT GESCHLECHTSROLLEN-LOGIK) ──────────
-    elif inhalt.startswith("!ship"):
-        if len(message.mentions) >= 2:
-            u1, u2 = message.mentions[0], message.mentions[1]
-        elif len(message.mentions) == 1:
-            u1, u2 = message.author, message.mentions[0]
-        else:
-            await message.reply(embed=fehler_embed("Nutze: `!ship @user1 @user2`"))
-            return
+# ─── ADMINISTRATIVER BEREICH ───────────────────────────────
+@bot.tree.command(name="xp-geben", description="Fügt administrative XP hinzu.")
+@app_commands.checks.has_permissions(administrator=True)
+async def admin_xp(interaction: discord.Interaction, user: discord.Member, menge: int):
+    if menge <= 0: return await interaction.response.send_message(embed=fehler_embed("Menge muss positiv sein."), ephemeral=True)
+    xp_geben(str(user.id), menge)
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("⚙️ System-Eingriff", f"{user.mention} wurden erfolgreich **{menge} XP** gutgeschrieben.", BotFarben.ERFOLG))
 
-        if u1 == u2:
-            await message.reply(embed=fehler_embed("Du kannst dich nicht mit dir selbst shippen!"))
-            return
+@admin_xp.error
+async def admin_xp_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(embed=fehler_embed("Du besitzt nicht die erforderlichen Rechte (`Administrator`), um diesen Befehl zu nutzen."), ephemeral=True)
 
-        # Rollen-Namen festlegen
-        ROLLE_M = "Männlich"
-        ROLLE_W = "Weiblich"
-        ROLLE_D = "Divers"
-
-        g1, g2 = None, None
-
-        # Geschlecht für User 1 auslesen
-        u1_rollen = [r.name for r in u1.roles]
-        if ROLLE_D in u1_rollen: g1 = "divers"
-        elif ROLLE_M in u1_rollen: g1 = "männlich"
-        elif ROLLE_W in u1_rollen: g1 = "weiblich"
-
-        # Geschlecht für User 2 auslesen
-        u2_rollen = [r.name for r in u2.roles]
-        if ROLLE_D in u2_rollen: g2 = "divers"
-        elif ROLLE_M in u2_rollen: g2 = "männlich"
-        elif ROLLE_W in u2_rollen: g2 = "weiblich"
-
-        if not g1 or not g2:
-            await message.reply(embed=fehler_embed("Mindestens einer der User hat keine Geschlechts-Rolle (Männlich, Weiblich, Divers)!"))
-            return
-
-        # Logik: Divers passt auf alles. Sonst geht nur Männlich+Männlich oder Weiblich+Weiblich
-        darf_shippen = False
-        if g1 == "divers" or g2 == "divers":
-            darf_shippen = True
-        elif g1 == g2:
-            darf_shippen = True
-
-        if not darf_shippen:
-            await message.reply(embed=fehler_embed(f"Shippen blockiert! {u1.display_name} ({g1}) und {u2.display_name} ({g2}) dürfen sich laut Rollen nicht shippen."))
-            return
-
-        random.seed((u1.id + u2.id) % 101)
-        p = random.randint(0, 100)
-        random.seed()
-        emoji = "💕" if p >= 80 else "💖" if p >= 60 else "💛" if p >= 40 else "💔" if p >= 20 else "😬"
-        text = "Perfektes Match!" if p >= 80 else "Sehr gute Chancen!" if p >= 60 else "Naja..." if p >= 40 else "Eher nicht..." if p >= 20 else "Keine Chance!"
-        balken = "❤️"*(p//10) + "🖤"*(10-p//10)
-        await message.reply(embed=discord.Embed(title="💘 Ship-O-Meter", description=f"**{u1.display_name}** & **{u2.display_name}**\n\n{balken}\n**{p}%** {emoji}\n*{text}*", color=0xFF6B9D))
-
-    # ── !avatar ───────────────────────────────────────────
-    elif inhalt.startswith("!avatar"):
-        ziel = message.mentions[0] if message.mentions else message.author
-        embed = discord.Embed(title=f"🖼️ {ziel.display_name}", color=FARBE_INFO)
-        embed.set_image(url=ziel.display_avatar.url)
-        await message.reply(embed=embed)
-
-    # ── !passwort ─────────────────────────────────────────
-    elif inhalt.startswith("!passwort"):
-        t = inhalt.split(" ")
-        l = min(max(int(t[1]),8),64) if len(t)>1 and t[1].isdigit() else 16
-        pw = "".join(random.choice(string.ascii_letters+string.digits+"!@#$%^&*") for _ in range(l))
-        embed = discord.Embed(title="🔐 Sicheres Passwort", color=FARBE_TOOL)
-        embed.add_field(name="Passwort", value=f"||`{pw}`||", inline=False)
-        embed.add_field(name="Länge", value=str(l), inline=True)
-        embed.set_footer(text="⚠️ Nur du siehst den Spoiler! Speichere es sicher.")
-        await message.reply(embed=embed)
-
-    # ── !umrechnen ────────────────────────────────────────
-    elif inhalt.startswith("!umrechnen "):
-        t = inhalt.split(" ")
-        if len(t) < 4:
-            await message.reply(embed=discord.Embed(title="🔄 Umrechner", description="Nutze: `!umrechnen [zahl] [von] [zu]`\nz.B. `!umrechnen 100 km miles`\n\n**Unterstützt:** km↔miles, kg↔lbs, celsius↔fahrenheit, liter↔gallonen, euro↔dollar", color=FARBE_TOOL))
-        else:
-            try:
-                zahl = float(t[1])
-                von, zu = t[2].lower(), t[3].lower()
-                umr = {("km","miles"):lambda x:x*0.621371,("miles","km"):lambda x:x*1.60934,
-                       ("kg","lbs"):lambda x:x*2.20462,("lbs","kg"):lambda x:x/2.20462,
-                       ("celsius","fahrenheit"):lambda x:x*9/5+32,("fahrenheit","celsius"):lambda x:(x-32)*5/9,
-                       ("liter","gallonen"):lambda x:x*0.264172,("gallonen","liter"):lambda x:x*3.78541,
-                       ("euro","dollar"):lambda x:x*1.08,("dollar","euro"):lambda x:x/1.08}
-                if (von,zu) in umr:
-                    ergebnis = round(umr[(von,zu)](zahl), 4)
-                    embed = discord.Embed(title="🔄 Umrechnung", color=FARBE_TOOL)
-                    embed.add_field(name="Eingabe", value=f"`{zahl} {von}`", inline=True)
-                    embed.add_field(name="Ergebnis", value=f"**{ergebnis} {zu}**", inline=True)
-                    await message.reply(embed=embed)
-                else:
-                    await message.reply(embed=fehler_embed(f"Kann `{von}` nicht in `{zu}` umrechnen!"))
-            except Exception:
-                await message.reply(embed=fehler_embed("Ungültige Eingabe!"))
-
-    # ── !umfrage ──────────────────────────────────────────
-    elif inhalt.startswith("!umfrage "):
-        frage = inhalt[9:]
-        embed = discord.Embed(title="📊 Umfrage", description=f"## {frage}", color=FARBE_TOOL)
-        embed.set_footer(text=f"Erstellt von {user_name}", icon_url=avatar_url)
-        msg = await message.channel.send(embed=embed)
-        for r in ["👍","👎","🤷"]: await msg.add_reaction(r)
-
-    # ── !erinnere ─────────────────────────────────────────
-    elif inhalt.startswith("!erinnere "):
-        t = inhalt[10:].split(" ", 1)
-        if len(t) < 2:
-            await message.reply(embed=fehler_embed("Nutze: `!erinnere 10m Text`"))
-        else:
-            sek = parse_zeit(t[0])
-            if sek is None or sek > 86400:
-                await message.reply(embed=fehler_embed("Ungültige Zeit (max 24h)!"))
-            else:
-                await message.reply(embed=discord.Embed(title="⏰ Erinnerung gesetzt", description=f"In **{t[0]}**: *{t[1]}*", color=FARBE_TOOL))
-                await asyncio.sleep(sek)
-                await message.channel.send(content=message.author.mention, embed=discord.Embed(title="🔔 Erinnerung!", description=t[1], color=0xF39C12))
-
-    # ── !todo ─────────────────────────────────────────────
-    elif inhalt.startswith("!todo"):
-        t = inhalt.split(" ", 2)
-        if user_id not in todo_listen: todo_listen[user_id] = []
-        aktion = t[1] if len(t) > 1 else "liste"
-        if aktion == "liste" or len(t) == 1:
-            if not todo_listen[user_id]:
-                await message.reply(embed=discord.Embed(description="📋 Liste leer! `!todo add [aufgabe]`", color=FARBE_TOOL))
-            else:
-                liste = "\n".join(f"**{i+1}.** {x}" for i,x in enumerate(todo_listen[user_id]))
-                await message.reply(embed=discord.Embed(title="📋 To-Do Liste", description=liste, color=FARBE_TOOL))
-        elif aktion == "add" and len(t) > 2:
-            todo_listen[user_id].append(t[2])
-            await message.reply(embed=discord.Embed(description=f"✅ Hinzugefügt: *{t[2]}*", color=FARBE_ERFOLG))
-        elif aktion == "done" and len(t) > 2 and t[2].isdigit():
-            idx = int(t[2])-1
-            if 0 <= idx < len(todo_listen[user_id]):
-                e = todo_listen[user_id].pop(idx)
-                await message.reply(embed=discord.Embed(description=f"🎉 Erledigt: *{e}*", color=FARBE_ERFOLG))
-        elif aktion == "clear":
-            todo_listen[user_id] = []
-            await message.reply(embed=discord.Embed(description="🗑️ Liste geleert!", color=FARBE_ERFOLG))
-
-    # ── !willkommen ───────────────────────────────────────
-    elif inhalt.startswith("!willkommen"):
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst **Server verwalten**!"))
-        elif "aus" in inhalt:
-            willkommen_kanal.pop(str(message.guild.id), None)
-            await message.reply(embed=discord.Embed(description="✅ Willkommen deaktiviert!", color=FARBE_ERFOLG))
-        else:
-            willkommen_kanal[str(message.guild.id)] = message.channel.id
-            await message.reply(embed=discord.Embed(description=f"✅ Willkommen in {message.channel.mention} activated!", color=FARBE_ERFOLG))
-
-    # ── !giveaway ─────────────────────────────────────────
-    elif inhalt.startswith("!giveaway "):
-        if not message.author.guild_permissions.manage_guild:
-            await message.reply(embed=fehler_embed("Du brauchst **Server verwalten**!"))
-        else:
-            t = inhalt.split(" ", 2)
-            if len(t) < 3:
-                await message.reply(embed=fehler_embed("Nutze: `!giveaway [zeit] [preis]`\nz.B. `!giveaway 10m Discord Nitro`"))
-            else:
-                sek = parse_zeit(t[1])
-                if not sek:
-                    await message.reply(embed=fehler_embed("Ungültige Zeitangabe! Nutze z.B. 30s, 10m, 2h"))
-                else:
-                    preis = t[2]
-                    embed = discord.Embed(title="🎉 GIVEAWAY 🎉", description=f"Gewinne: **{preis}**\nReagiere mit 🎉 um teilzunehmen!\nZeit: {t[1]}", color=FARBE_SPIEL)
-                    g_msg = await message.channel.send(embed=embed)
-                    await g_msg.add_reaction("🎉")
-                    
-                    await asyncio.sleep(sek)
-                    
-                    g_msg = await message.channel.fetch_message(g_msg.id)
-                    users = []
-                    for reaction in g_msg.reactions:
-                        if str(reaction.emoji) == "🎉":
-                            async for u in reaction.users():
-                                if not u.bot:
-                                    users.append(u)
-                    
-                    if users:
-                        gewinner = random.choice(users)
-                        await message.channel.send(f"🎉 Herzlichen Glückwunsch {gewinner.mention}! Du hast **{preis}** gewonnen!")
-                    else:
-                        await message.channel.send("😢 Das Giveaway ist vorbei, aber niemand hat teilgenommen.")
-
-    # ── !hilfe ────────────────────────────────────────────
-    elif inhalt == "!hilfe":
-        embed = discord.Embed(title="📜 Bot Befehlsliste", description="Hier sind alle verfügbaren Befehle:", color=FARBE_INFO)
-        embed.add_field(name="🤖 KI & Tools", value="`!ki [Frage]` · `!persönlichkeit` · `!übersetzen [Text]` · `!zusammenfassen [Text]` · `!rechne [Formel]` · `!umrechnen [Werte]`", inline=False)
-        embed.add_field(name="🎮 Spiele & Spaß", value="`!hangman` · `!quiz` · `!rate` · `!ssp [Wahl]` · `!ttt @user` · `!ship @user` · `!würfel` · `!münze` · `!geschichte [Thema]` · `!reim [Thema]` · `!witz` · `!fakt` · `!kompliment`", inline=False)
-        embed.add_field(name="⭐ Level-System", value="`!rank [@user]` · `!leaderboard` · `!xp-geben @user [menge]` *(Admin)*", inline=False)
-        embed.add_field(name="⚙️ Utilities", value="`!merke [Text]` · `!merkliste` · `!vergiss` · `!avatar [@user]` · `!passwort [Länge]` · `!umfrage [Frage]` · `!erinnere [Zeit] [Text]` · `!todo [add/done/clear]`", inline=False)
-        embed.add_field(name="🛠️ Moderation", value="`!willkommen [aus]` · `!giveaway [Zeit] [Preis]`", inline=False)
-        await message.reply(embed=embed)
-
+# ─── BOT START ─────────────────────────────────────────────
 bot.run(DISCORD_TOKEN)
