@@ -23,7 +23,7 @@ bot = discord.Client(intents=intents)
 chat_verlaeufe = {}
 persoenlichkeit = {}
 merkliste = {}
-levels = {}
+levels = {}  # Struktur: {user_id: {"xp": 0, "level": 1, "gesamt_xp": 0}}
 rate_spiel = {}
 todo_listen = {}
 warnungen = {}
@@ -95,14 +95,21 @@ def parse_zeit(text):
 
 def xp_geben(user_id, menge=5):
     if user_id not in levels:
-        levels[user_id] = {"xp": 0, "level": 1}
+        levels[user_id] = {"xp": 0, "level": 1, "gesamt_xp": 0}
+    
     levels[user_id]["xp"] += menge
+    levels[user_id]["gesamt_xp"] += menge
+    
     benoetigt = levels[user_id]["level"] * 100
-    if levels[user_id]["xp"] >= benoetigt:
+    level_up = False
+    
+    while levels[user_id]["xp"] >= benoetigt:
         levels[user_id]["xp"] -= benoetigt
         levels[user_id]["level"] += 1
-        return True
-    return False
+        benoetigt = levels[user_id]["level"] * 100
+        level_up = True
+        
+    return level_up
 
 async def groq_anfrage(messages, modell="llama-3.3-70b-versatile", max_tokens=1000):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -143,6 +150,11 @@ async def on_message(message):
     user_id = str(message.author.id)
     user_name = message.author.display_name
     avatar_url = message.author.display_avatar.url
+
+    # Standardmäßig 1 XP pro geschriebene Nachricht geben (Spam-Schutz: Nachricht muss länger als 3 Zeichen sein)
+    if len(inhalt) > 3 and not inhalt.startswith("!"):
+        if xp_geben(user_id, random.randint(1, 3)):
+            await message.channel.send(f"🎉 **GG** {message.author.mention}, du bist auf **Level {levels[user_id]['level']}** aufgestiegen!")
 
     # ── Hangman: Buchstabe raten ──────────────────────────
     if user_id in hangman_spiele and len(inhalt) == 1 and inhalt.isalpha():
@@ -272,7 +284,7 @@ async def on_message(message):
             persoenlichkeit[user_id] = w
             pi = PERSONA_INFO[w]
             begruess = {"anwalt":"Wie kann ich Ihnen helfen?","mädel":"Heyyy! 😊✨","lehrer":"Guten Tag!","pirat":"Arrr! Landratte!","standard":"Bereit!"}
-            await message.reply(embed=discord.Embed(title=f"{pi['emoji']} {pi['name']}", description=begruess[w], color=pi["farbe"]))
+            await message.reply(discord.Embed(title=f"{pi['emoji']} {pi['name']}", description=begruess[w], color=pi["farbe"]))
         else:
             await message.reply(embed=fehler_embed("Unbekannt! Nutze `!persönlichkeit` für die Liste."))
 
@@ -294,6 +306,78 @@ async def on_message(message):
     elif inhalt == "!vergiss":
         merkliste[user_id] = []
         await message.reply(embed=discord.Embed(description="🗑️ Alles vergessen!", color=FARBE_ERFOLG))
+
+    # ── !rank (NEU AUSGEBAUT) ──────────────────────────────
+    elif inhalt.startswith("!rank"):
+        ziel = message.mentions[0] if message.mentions else message.author
+        z_id = str(ziel.id)
+        
+        if z_id not in levels:
+            levels[z_id] = {"xp": 0, "level": 1, "gesamt_xp": 0}
+            
+        u_data = levels[z_id]
+        lvl = u_data["level"]
+        xp = u_data["xp"]
+        benoetigt = lvl * 100
+        prozent = int((xp / benoetigt) * 10)
+        fortschrittsbalken = "🟩" * prozent + "⬛" * (10 - prozent)
+        
+        embed = discord.Embed(title=f"⭐ Rangkarte von {ziel.display_name}", color=FARBE_INFO)
+        embed.set_thumbnail(url=ziel.display_avatar.url)
+        embed.add_field(name="Level", value=f"**{lvl}**", inline=True)
+        embed.add_field(name="XP", value=f"`{xp} / {benoetigt}` (Gesamt: {u_data['gesamt_xp']})", inline=True)
+        embed.add_field(name="Fortschritt", value=f"{fortschrittsbalken} ({int((xp/benoetigt)*100)}%)", inline=False)
+        await message.reply(embed=embed)
+
+    # ── !leaderboard (NEU AUSGEBAUT) ───────────────────────
+    elif inhalt == "!leaderboard":
+        if not levels:
+            await message.reply(embed=discord.Embed(description="Es wurden noch keine XP gesammelt!", color=FARBE_INFO))
+            return
+            
+        # Nach Gesamt-XP sortieren
+        sortiert = sorted(levels.items(), key=lambda x: x[1]["gesamt_xp"], reverse=True)[:10]
+        text_liste = []
+        
+        for i, (uid, daten) in enumerate(sortiert):
+            try:
+                u_obj = await message.guild.fetch_member(int(uid))
+                u_name = u_obj.display_name
+            except Exception:
+                u_name = f"Unbekannter User ({uid})"
+                
+            platz_emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"**#{i+1}**"
+            text_liste.append(f"{platz_emoji} {u_name} · Level {daten['level']} ({daten['gesamt_xp']} Gesamt-XP)")
+            
+        embed = discord.Embed(title="🏆 XP Leaderboard (Top 10)", description="\n".join(text_liste), color=FARBE_SPIEL)
+        await message.reply(embed=embed)
+
+    # ── !xp-geben (NEU AUSGEBAUT) ──────────────────────────
+    elif inhalt.startswith("!xp-geben "):
+        if not message.author.guild_permissions.administrator:
+            await message.reply(embed=fehler_embed("Du benötigst Administrator-Rechte, um XP zu vergeben!"))
+            return
+            
+        t = inhalt.split(" ")
+        if len(t) < 3 or not message.mentions:
+            await message.reply(embed=fehler_embed("Nutze: `!xp-geben @user [menge]`"))
+            return
+            
+        ziel = message.mentions[0]
+        try:
+            menge = int(t[2]) if t[2].isdigit() else int(t[1])
+        except Exception:
+            menge = 0
+            
+        if menge <= 0:
+            await message.reply(embed=fehler_embed("Bitte gib eine gültige Zahl größer als 0 ein."))
+            return
+            
+        level_up = xp_geben(str(ziel.id), menge)
+        embed = discord.Embed(description=f"✅ {message.author.mention} hat {ziel.mention} **{menge} XP** gegeben!", color=FARBE_ERFOLG)
+        await message.reply(embed=embed)
+        if level_up:
+            await message.channel.send(f"🎉 {ziel.mention} hat durch das Geschenk ein **Level-Up** auf Level **{levels[str(ziel.id)]['level']}** erreicht!")
 
     # ── !übersetzen ───────────────────────────────────────
     elif inhalt.startswith("!übersetzen "):
@@ -463,7 +547,7 @@ async def on_message(message):
                 embed.set_footer(text="Schreibe 1-9 um zu spielen!")
                 await message.channel.send(embed=embed)
 
-    # ── !ship ─────────────────────────────────────────────
+    # ── !ship (JETZT MIT GESCHLECHTSROLLEN-LOGIK) ──────────
     elif inhalt.startswith("!ship"):
         if len(message.mentions) >= 2:
             u1, u2 = message.mentions[0], message.mentions[1]
@@ -472,6 +556,45 @@ async def on_message(message):
         else:
             await message.reply(embed=fehler_embed("Nutze: `!ship @user1 @user2`"))
             return
+
+        if u1 == u2:
+            await message.reply(embed=fehler_embed("Du kannst dich nicht mit dir selbst shippen!"))
+            return
+
+        # Rollen-Namen festlegen
+        ROLLE_M = "Männlich"
+        ROLLE_W = "Weiblich"
+        ROLLE_D = "Divers"
+
+        g1, g2 = None, None
+
+        # Geschlecht für User 1 auslesen
+        u1_rollen = [r.name for r in u1.roles]
+        if ROLLE_D in u1_rollen: g1 = "divers"
+        elif ROLLE_M in u1_rollen: g1 = "männlich"
+        elif ROLLE_W in u1_rollen: g1 = "weiblich"
+
+        # Geschlecht für User 2 auslesen
+        u2_rollen = [r.name for r in u2.roles]
+        if ROLLE_D in u2_rollen: g2 = "divers"
+        elif ROLLE_M in u2_rollen: g2 = "männlich"
+        elif ROLLE_W in u2_rollen: g2 = "weiblich"
+
+        if not g1 or not g2:
+            await message.reply(embed=fehler_embed("Mindestens einer der User hat keine Geschlechts-Rolle (Männlich, Weiblich, Divers)!"))
+            return
+
+        # Logik: Divers passt auf alles. Sonst geht nur Männlich+Männlich oder Weiblich+Weiblich
+        darf_shippen = False
+        if g1 == "divers" or g2 == "divers":
+            darf_shippen = True
+        elif g1 == g2:
+            darf_shippen = True
+
+        if not darf_shippen:
+            await message.reply(embed=fehler_embed(f"Shippen blockiert! {u1.display_name} ({g1}) und {u2.display_name} ({g2}) dürfen sich laut Rollen nicht shippen."))
+            return
+
         random.seed((u1.id + u2.id) % 101)
         p = random.randint(0, 100)
         random.seed()
@@ -577,7 +700,7 @@ async def on_message(message):
             await message.reply(embed=discord.Embed(description="✅ Willkommen deaktiviert!", color=FARBE_ERFOLG))
         else:
             willkommen_kanal[str(message.guild.id)] = message.channel.id
-            await message.reply(embed=discord.Embed(description=f"✅ Willkommen in {message.channel.mention} aktiviert!", color=FARBE_ERFOLG))
+            await message.reply(embed=discord.Embed(description=f"✅ Willkommen in {message.channel.mention} activated!", color=FARBE_ERFOLG))
 
     # ── !giveaway ─────────────────────────────────────────
     elif inhalt.startswith("!giveaway "):
@@ -599,7 +722,6 @@ async def on_message(message):
                     
                     await asyncio.sleep(sek)
                     
-                    # Nachricht neu laden, um die Reaktionen abzufragen
                     g_msg = await message.channel.fetch_message(g_msg.id)
                     users = []
                     for reaction in g_msg.reactions:
@@ -619,6 +741,7 @@ async def on_message(message):
         embed = discord.Embed(title="📜 Bot Befehlsliste", description="Hier sind alle verfügbaren Befehle:", color=FARBE_INFO)
         embed.add_field(name="🤖 KI & Tools", value="`!ki [Frage]` · `!persönlichkeit` · `!übersetzen [Text]` · `!zusammenfassen [Text]` · `!rechne [Formel]` · `!umrechnen [Werte]`", inline=False)
         embed.add_field(name="🎮 Spiele & Spaß", value="`!hangman` · `!quiz` · `!rate` · `!ssp [Wahl]` · `!ttt @user` · `!ship @user` · `!würfel` · `!münze` · `!geschichte [Thema]` · `!reim [Thema]` · `!witz` · `!fakt` · `!kompliment`", inline=False)
+        embed.add_field(name="⭐ Level-System", value="`!rank [@user]` · `!leaderboard` · `!xp-geben @user [menge]` *(Admin)*", inline=False)
         embed.add_field(name="⚙️ Utilities", value="`!merke [Text]` · `!merkliste` · `!vergiss` · `!avatar [@user]` · `!passwort [Länge]` · `!umfrage [Frage]` · `!erinnere [Zeit] [Text]` · `!todo [add/done/clear]`", inline=False)
         embed.add_field(name="🛠️ Moderation", value="`!willkommen [aus]` · `!giveaway [Zeit] [Preis]`", inline=False)
         await message.reply(embed=embed)
