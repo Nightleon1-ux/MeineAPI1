@@ -159,7 +159,74 @@ def xp_geben(user_id: str, menge: int = 5) -> bool:
         benoetigt = u.level * 100
         level_up = True
     return level_up
-
 @bot.event
 async def on_ready():
     print(f"🤖 Bot erfolgreich gestartet als: {bot.user}")
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild: return
+    user_id = str(message.author.id)
+    u = state.get_user(user_id)
+    
+    if len(message.content) > 3 and not message.content.startswith("/"):
+        if xp_geben(user_id, random.randint(2, 5)):
+            await message.channel.send(embed=erstelle_embed("🎉 Level Up!", f"{message.author.mention} ist nun **Level {u.level}**!", BotFarben.ERFOLG))
+        if random.random() < 0.20:
+            u.muenzen += random.randint(1, 5)
+
+@bot.tree.command(name="hilfe", description="Zeigt die Befehlsübersicht.")
+async def hilfe(interaction: discord.Interaction):
+    embed = discord.Embed(title="⚙️ Kontrollzentrum", color=BotFarben.INFO)
+    embed.add_field(name="🪙 Wirtschaft & Berufe", value="`/money` · `/daily` · `/work` · `/mine` · `/sell` · `/shop` · `/buy` · `/inventory`", inline=False)
+    embed.add_field(name="💞 Ehe & Familie", value="`/ship` · `/marry` · `/divorce` · `/marry-status` · `/love` · `/family` · `/baby-feed` · `/baby-play`", inline=False)
+    embed.add_field(name="🎮 Fun & Quiz", value="`/quiz` · `/coinflip` · `/schere-stein` · `/zahlen-raten` · `/wurf`", inline=False)
+    embed.add_field(name="🐾 Haustiere & KI", value="`/pet-adopt` · `/pet-status` · `/pet-feed` · `/ki` · `/persönlichkeit` · `/rank` · `/leaderboard`", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# ─── WIRTSCHAFTS-LOGIK ──────────────────────────────────────
+@bot.tree.command(name="money", description="Zeigt deinen aktuellen Kontostand.")
+async def money(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    await interaction.response.send_message(embed=erstelle_embed("🪙 Kontostand", f"Du besitzt aktuell **{u.muenzen} Münzen**.", BotFarben.WIRTSCHAFT))
+
+@bot.tree.command(name="daily", description="Hol dir deine tägliche Belohnung ab.")
+async def daily(interaction: discord.Interaction):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); jetzt = datetime.now(timezone.utc)
+    if u.letztes_daily and jetzt < datetime.fromisoformat(u.letztes_daily) + timedelta(days=1):
+        return await interaction.response.send_message(embed=fehler_embed("Dein Daily steht erst morgen wieder bereit."), ephemeral=True)
+    u.letztes_daily = jetzt.isoformat(); u.muenzen += 75; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎁 Tägliche Belohnung", "Du hast **75 Münzen** erhalten!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="work", description="Gehe arbeiten, um Geld zu verdienen.")
+@app_commands.choices(beruf=[
+    app_commands.Choice(name="👷 Bauarbeiter (Sicher)", value="bau"),
+    app_commands.Choice(name="💻 Programmierer (Risiko)", value="dev")
+])
+async def work(interaction: discord.Interaction, beruf: app_commands.Choice[str]):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); jetzt = datetime.now(timezone.utc)
+    if u.letzte_arbeit and jetzt < datetime.fromisoformat(u.letzte_arbeit) + timedelta(hours=1):
+        return await interaction.response.send_message(embed=fehler_embed("Du bist zu müde. Warte 1 Stunde."), ephemeral=True)
+    
+    lohn = random.randint(45, 65) if beruf.value == "bau" else random.randint(20, 130)
+    u.muenzen += lohn; u.letzte_arbeit = jetzt.isoformat(); state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("💼 Arbeit beendet", f"Du hast fleißig gearbeitet und **{lohn} Münzen** verdient.", BotFarben.WIRTSCHAFT))
+
+@bot.tree.command(name="mine", description="Arbeite in den Minen und sammle Erze.")
+async def mine(interaction: discord.Interaction):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); jetzt = datetime.now(timezone.utc)
+    if u.letzte_mine and jetzt < datetime.fromisoformat(u.letzte_mine) + timedelta(minutes=45):
+        return await interaction.response.send_message(embed=fehler_embed("Die Mine ist vorübergehend gesperrt. Warte 45 Minuten."), ephemeral=True)
+    
+    rand = random.random()
+    erz = "kohle" if rand < 0.55 else ("eisen" if rand < 0.85 else ("gold" if rand < 0.96 else "diamant"))
+    u.inventar[erz] = u.inventar.get(erz, 0) + 1; u.letzte_mine = jetzt.isoformat(); state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("⛏️ Bergbau-Erfolg", f"Du hast tief gegraben und **{ERZ_PREISE[erz]['name']}** gefunden!", BotFarben.SPIEL))
+
+@bot.tree.command(name="sell", description="Verkaufe deine Erze aus dem Inventar.")
+@app_commands.choices(erz_id=[app_commands.Choice(name="⚫ Kohle", value="kohle"), app_commands.Choice(name="🪙 Eisen", value="eisen"), app_commands.Choice(name="🟡 Gold", value="gold"), app_commands.Choice(name="💎 Diamant", value="diamant")])
+async def sell(interaction: discord.Interaction, erz_id: app_commands.Choice[str], anzahl: int = 1):
+    u = state.get_user(str(interaction.user.id))
+    if u.inventar.get(erz_id.value, 0) < anzahl or anzahl <= 0: return await interaction.response.send_message(embed=fehler_embed("Du hast nicht genügend Erze im Inventar."), ephemeral=True)
+    erloes = ERZ_PREISE[erz_id.value]["wert"] * anzahl; u.inventar[erz_id.value] -= anzahl; u.muenzen += erloes; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("⚖️ Rohstoff-Markt", f"Du hast {anzahl}x {erz_id.name} für **{erloes} Münzen** verkauft.", BotFarben.WIRTSCHAFT))
+    
