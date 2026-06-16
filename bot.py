@@ -2566,4 +2566,6 @@ if __name__ == "__main__":
         print("✅ Alle Daten gespeichert.")
     except Exception as e:
         print(f"❌ Kritischer Fehler: {e}")
-        state.save_all() 
+        state.save_all()
+    
+          bot.run(DISCORD_TOKEN)
