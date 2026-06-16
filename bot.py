@@ -1,8 +1,10 @@
 import discord
 from discord import app_commands
+import aiohttp
 import os
-import json
 import random
+import asyncio
+import json
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
@@ -11,42 +13,145 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# ─── OWNER CONFIGURATION ───────────────────────────────────
-OWNER_ID = 1405193599984861255  # Deine Discord-ID (Nightleon1)
+# ─── OWNER KONFIGURATION ───────────────────────────────────
+OWNER_ID = 1405193599984861255  # Deine Discord ID als Nightleon1
 
-# ─── COLOR PALETTE ─────────────────────────────────────────
+# ─── STATISCHE KONFIGURATIONEN ─────────────────────────────
+LEVEL_ROLLEN_BELOHNUNGEN = {
+    5: "Bronze-Mitglied",
+    10: "Silber-Mitglied",
+    15: "Gold-Mitglied",
+    20: "Platin-Mitglied",
+    30: "Diamant-Mitglied"
+}
+
+SHOP_ITEMS = {
+    "kekse": {"name": "🍪 Kekse", "preis": 25, "beschreibung": "Futter für dein Haustier (-30 Hunger)", "typ": "item"},
+    "steak": {"name": "🥩 Premium Steak", "preis": 60, "beschreibung": "Perfekt für Haustiere (-80 Hunger)", "typ": "item"},
+    "milch": {"name": "🍼 Milchflasche", "preis": 40, "beschreibung": "Nahrung für dein Kind (-35 Hunger)", "typ": "item"},
+    
+    "hacke_holz": {"name": "🪵 Holz-Spitzhacke", "preis": 50, "beschreibung": "Haltbarkeit: 5 Einsätze.", "typ": "tool", "max_uses": 5, "luck": 1.0},
+    "hacke_stein": {"name": "🪨 Stein-Spitzhacke", "preis": 120, "beschreibung": "Haltbarkeit: 12 Einsätze.", "typ": "tool", "max_uses": 12, "luck": 1.1},
+    "hacke_kupfer": {"name": "🟫 Kupfer-Spitzhacke", "preis": 250, "beschreibung": "Haltbarkeit: 20 Einsätze.", "typ": "tool", "max_uses": 20, "luck": 1.2},
+    "hacke_eisen": {"name": "🪙 Eisen-Spitzhacke", "preis": 450, "beschreibung": "Haltbarkeit: 35 Einsätze.", "typ": "tool", "max_uses": 35, "luck": 1.4},
+    "hacke_stahl": {"name": "⚔️ Stahl-Spitzhacke", "preis": 700, "beschreibung": "Haltbarkeit: 50 Einsätze.", "typ": "tool", "max_uses": 50, "luck": 1.6},
+    "hacke_gold": {"name": "🟡 Gold-Spitzhacke", "preis": 1000, "beschreibung": "Magisch! Haltbarkeit: 15 Einsätze.", "typ": "tool", "max_uses": 15, "luck": 2.5},
+    "hacke_diamant": {"name": "💎 Diamant-Spitzhacke", "preis": 1800, "beschreibung": "Haltbarkeit: 80 Einsätze.", "typ": "tool", "max_uses": 80, "luck": 2.0},
+    "hacke_obsidian": {"name": "🔮 Obsidian-Spitzhacke", "preis": 2500, "beschreibung": "Haltbarkeit: 120 Einsätze.", "typ": "tool", "max_uses": 120, "luck": 2.2},
+    "hacke_titan": {"name": "🛡️ Titan-Spitzhacke", "preis": 4000, "beschreibung": "Haltbarkeit: 200 Einsätze.", "typ": "tool", "max_uses": 200, "luck": 2.6},
+    "hacke_mythril": {"name": "✨ Mythril-Spitzhacke", "preis": 7500, "beschreibung": "Haltbarkeit: 300 Einsätze.", "typ": "tool", "max_uses": 300, "luck": 3.5}
+}
+
+ERZ_PREISE = {
+    "kohle": {"name": "⚫ Kohle", "wert": 15},
+    "eisen": {"name": "🪙 Eisenerz", "wert": 35},
+    "gold": {"name": "🟡 Golderz", "wert": 75},
+    "diamant": {"name": "💎 Diamant", "wert": 200},
+    "schrott": {"name": "⚙️ Elektronik-Schrott", "wert": 110},
+    "astral": {"name": "🌌 Astralsplitter", "wert": 320},
+    "fragment": {"name": "🔮 Zeit-Fragment", "wert": 500}
+}
+
+PET_TYPEN = {
+    "Katze": {"emoji": "🐱", "preis": 0, "min_level": 1, "atki_bonus": 5, "premium": False},
+    "Hund": {"emoji": "🐶", "preis": 0, "min_level": 1, "atki_bonus": 6, "premium": False},
+    "Hase": {"emoji": "🐰", "preis": 150, "min_level": 3, "atki_bonus": 4, "premium": False},
+    "Fuchs": {"emoji": "🦊", "preis": 400, "min_level": 5, "atki_bonus": 8, "premium": False},
+    "Bär": {"emoji": "🐻", "preis": 800, "min_level": 8, "atki_bonus": 12, "premium": False},
+    "Panda": {"emoji": "🐼", "preis": 1200, "min_level": 10, "atki_bonus": 10, "premium": False},
+    "Löwe": {"emoji": "🦁", "preis": 2000, "min_level": 12, "atki_bonus": 16, "premium": False},
+    "Affenkoenig": {"emoji": "🐵", "preis": 3500, "min_level": 15, "atki_bonus": 14, "premium": False},
+    "Drache": {"emoji": "🐉", "preis": 6000, "min_level": 18, "atki_bonus": 22, "premium": False},
+    "Phönix": {"emoji": "✨", "preis": 9999, "min_level": 20, "atki_bonus": 25, "premium": False},
+    # Premium Tiere
+    "Pegasus": {"emoji": "🦄", "preis": 2500, "min_level": 5, "atki_bonus": 15, "premium": True},
+    "Schattenwolf": {"emoji": "🐺", "preis": 5000, "min_level": 12, "atki_bonus": 24, "premium": True},
+    "Mecha-Greif": {"emoji": "🦅", "preis": 8500, "min_level": 18, "atki_bonus": 30, "premium": True},
+    "Leviathan": {"emoji": "🐉", "preis": 12000, "min_level": 22, "atki_bonus": 40, "premium": True},
+    "Kosmische_Katze": {"emoji": "🌌", "preis": 20000, "min_level": 25, "atki_bonus": 50, "premium": True}
+}
+
+ABENTEUER_GEBIETE = {
+    "wald": {"name": "🌲 Grüner Wald (Sicher)", "hunger_kosten": 15, "min_level": 1, "schaden_max": 10, "looten": ["kohle", "eisen", "kekse"], "legendaer_chance": 0.01, "premium": False},
+    "hoehle": {"name": "🦇 Düstere Höhle (Mittel)", "hunger_kosten": 30, "min_level": 5, "schaden_max": 35, "looten": ["eisen", "gold", "steak"], "legendaer_chance": 0.08, "premium": False},
+    "vulkan": {"name": "🌋 Vulkanland (Hochriskant)", "hunger_kosten": 50, "min_level": 10, "schaden_max": 75, "looten": ["gold", "diamant", "steak"], "legendaer_chance": 0.20, "premium": False},
+    "oedland": {"name": "⚡ Tesla-Ödland (Gefährlich)", "hunger_kosten": 65, "min_level": 12, "schaden_max": 90, "looten": ["eisen", "schrott", "diamant"], "legendaer_chance": 0.25, "premium": False},
+    "astral": {"name": "🌌 Astralebene (Magisch)", "hunger_kosten": 0, "min_level": 16, "schaden_max": 110, "looten": ["diamant", "astral", "astral"], "legendaer_chance": 0.35, "premium": False},
+    # Premium Welten
+    "schloss": {"name": "🏰 Schwebendes Schloss (Sicher & Edel)", "hunger_kosten": 20, "min_level": 5, "schaden_max": 0, "looten": ["gold", "diamant", "steak"], "legendaer_chance": 0.15, "premium": True},
+    "krater": {"name": "🌋 Urzeit-Krater (Extrem Lukrativ)", "hunger_kosten": 45, "min_level": 15, "schaden_max": 60, "looten": ["diamant", "astral", "gold"], "legendaer_chance": 0.45, "premium": True},
+    "chronos": {"name": "🪐 Chronos-Riss (Zeitlos)", "hunger_kosten": 0, "min_level": 22, "schaden_max": 80, "looten": ["astral", "fragment", "fragment"], "legendaer_chance": 0.50, "premium": True}
+}
+
+BOSS_GEGNER = [
+    {"name": "🦧 Der Riesenaffe", "hp": 120, "atk": 12, "min_level": 1, "belohnung_muenzen": 200, "xp": 100, "premium": False},
+    {"name": "🦂 Der Gift-Skorpion", "hp": 250, "atk": 22, "min_level": 8, "belohnung_muenzen": 600, "xp": 250, "premium": False},
+    {"name": "🤖 Der Mech-Skorpion", "hp": 400, "atk": 35, "min_level": 10, "belohnung_muenzen": 1000, "xp": 450, "premium": False},
+    {"name": "👹 Der Höhlen-Golem", "hp": 600, "atk": 45, "min_level": 15, "belohnung_muenzen": 1800, "xp": 700, "premium": False},
+    {"name": "🔮 Der Cyber-Dschinn", "hp": 950, "atk": 65, "min_level": 18, "belohnung_muenzen": 3500, "xp": 1200, "premium": False},
+    # Premium Bosse
+    {"name": "👑 König der Verdammten", "hp": 1500, "atk": 85, "min_level": 20, "belohnung_muenzen": 5000, "xp": 2000, "premium": True},
+    {"name": "💥 Obsidian-Titan", "hp": 2200, "atk": 110, "min_level": 25, "belohnung_muenzen": 8000, "xp": 3500, "premium": True},
+    {"name": "🌌 Dimensions-Schlucker", "hp": 3500, "atk": 150, "min_level": 30, "belohnung_muenzen": 15000, "xp": 6000, "premium": True}
+]
+
+PERSONAS = {
+    "standard": "Du bist ein hilfreicher Assistent.",
+    "pirat": "Du bist ein wilder Pirat! Arrr!",
+    "lehrer": "Du bist ein geduldiger Lehrer."
+}
+
+QUIZ_FRAGEN = [
+    {"frage": "Wie viele Planeten hat unser Sonnensystem?", "antwort": "8"},
+    {"frage": "Was ist das chemische Zeichen für Wasser?", "antwort": "H2O"},
+    {"frage": "Welches ist das größte Säugetier der Erde?", "antwort": "Blauwal"}
+]
+
 class BotFarben:
-    INFO = 0x5DADE2
+    KI = 0x5865F2
     ERFOLG = 0x57F287
     FEHLER = 0xED4245
-    PREMIUM = 0xD4AF37  # Edles VIP-Gold
+    SPIEL = 0xFEE75C
+    TOOL = 0xEB459E
+    INFO = 0x5DADE2
     WIRTSCHAFT = 0xE67E22
+    FAMILIE = 0xE91E63
+    PREMIUM = 0xD4AF37 # Goldfarben für Premium
 
-# ─── DATEN-MODELLE FÜR DAS GESAMTE SYSTEM ───────────────────
+# ─── DATEN-MODELLE ─────────────────────────────────────────
+@dataclass
+class ChildProfile:
+    name: str
+    hunger: int = 30
+    level: int = 1
+    letztes_spielen: Optional[str] = None
+
 @dataclass
 class UserProfile:
     xp: int = 0
     level: int = 1
     gesamt_xp: int = 0
     muenzen: int = 100
-    server_id: Optional[int] = None  
-    inventar: Dict[str, int] = field(default_factory=dict)  
-    
-    # Familien-System
+    inventar: Dict[str, int] = field(default_factory=dict)
+    todo: List[str] = field(default_factory=list)
+    ki_persona: str = "standard"
     partner_id: Optional[str] = None
     hochzeits_datum: Optional[str] = None
-    ehe_konto: int = 0
-    letzter_zins_claim: Optional[str] = None
     kinder: Dict[str, dict] = field(default_factory=dict)
-    
-    # Standard-Cooldowns
+    ehe_konto: int = 0
     letztes_daily: Optional[str] = None
     letzte_arbeit: Optional[str] = None
     letzte_mine: Optional[str] = None
-    
-    # Premium-Kosmetik & -Eigenschaften
-    premium_bis: Optional[str] = None  
+    arbeits_erfahrung: int = 0
+    berufs_stufe: int = 1
+    minen_counter: int = 0
+    aktive_hacke: Optional[str] = None
+    hacke_haltbarkeit: int = 0
+    # Premium Felder
+    premium_bis: Optional[str] = None  # ISO-Timestamp oder "permanent"
     premium_titel: Optional[str] = None
     premium_aura: Optional[str] = None
     premium_residenz_name: Optional[str] = None
@@ -61,36 +166,35 @@ class PetProfile:
     max_hp: int = 100
     aktuelle_hp: int = 100
     atk: int = 10
+    abenteuer_counter: int = 0
+    letztes_training: Optional[str] = None
+    letztes_streicheln: Optional[str] = None
     letztes_abenteuer: Optional[str] = None
     premium_verkleidung: Optional[str] = None
 
-# ─── SYSTEM-STATE & DATENBANK-VERWALTUNG ────────────────────
 class BotState:
-    def __init__(self, datei_pfad: str = "global_bot_daten.json"):
+    def __init__(self, datei_pfad: str = "bot_daten.json"):
         self.datei_pfad = datei_pfad
         self.user_daten: Dict[str, UserProfile] = {}
         self.pet_daten: Dict[str, PetProfile] = {}
+        self.chat_verlaeufe: Dict[str, List[dict]] = {}
         self.laden()
 
-    def get_user(self, user_id: str, server_id: Optional[int] = None) -> UserProfile:
+    def get_user(self, user_id: str) -> UserProfile:
         if user_id not in self.user_daten:
             self.user_daten[user_id] = UserProfile()
-        if server_id:
-            self.user_daten[user_id].server_id = server_id
         return self.user_daten[user_id]
 
     def ist_premium(self, user_id: str) -> bool:
         u = self.get_user(user_id)
-        if not u.premium_bis: 
-            return False
-        if u.premium_bis == "permanent": 
-            return True
+        if not u.premium_bis: return False
+        if u.premium_bis == "permanent": return True
         try:
             bis_zeit = datetime.fromisoformat(u.premium_bis)
             if datetime.now(timezone.utc) < bis_zeit:
                 return True
             else:
-                u.premium_bis = None  
+                u.premium_bis = None # Abgelaufen
                 self.speichern()
                 return False
         except:
@@ -105,444 +209,440 @@ class BotState:
             with open(self.datei_pfad, "w", encoding="utf-8") as f:
                 json.dump(daten, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print(f"⚠️ Fehler beim Speichern der Datenbank: {e}")
+            print(f"⚠️ Fehler beim Speichern: {e}")
 
     def laden(self):
         if os.path.exists(self.datei_pfad):
             try:
                 with open(self.datei_pfad, "r", encoding="utf-8") as f:
                     daten = json.load(f)
-                    self.user_daten = {
-                        uid: UserProfile(**{k: v for k, v in val.items() if k in UserProfile.__dataclass_fields__}) 
-                        for uid, val in daten.get("users", {}).items()
-                    }
-                    self.pet_daten = {
-                        uid: PetProfile(**{k: v for k, v in val.items() if k in PetProfile.__dataclass_fields__}) 
-                        for uid, val in daten.get("pets", {}).items()
-                    }
+                    self.user_daten = {uid: UserProfile(**{k: v for k, v in val.items() if k in UserProfile.__dataclass_fields__}) for uid, val in daten.get("users", {}).items()}
+                    self.pet_daten = {uid: PetProfile(**{k: v for k, v in val.items() if k in PetProfile.__dataclass_fields__}) for uid, val in daten.get("pets", {}).items()}
             except Exception as e:
-                print(f"⚠️ Fehler beim Laden der Datenbank: {e}")
+                print(f"⚠️ Fehler beim Laden: {e}")
 
 state = BotState()
 
-# ─── ERWEITERTE SHOP-DATENBANK ─────────────────────────────
-NAHRUNG_ITEMS = {
-    "erdbeere": {"name": "🍓 Frische Erdbeere", "preis": 5, "hunger": -5, "typ": "food"},
-    "blaubeere": {"name": "🫐 Blaubeere", "preis": 5, "hunger": -5, "typ": "food"},
-    "himbeere": {"name": "🍒 Himbeere", "preis": 8, "hunger": -8, "typ": "food"},
-    "kirsche": {"name": "🍒 Kirsche", "preis": 8, "hunger": -8, "typ": "food"},
-    "wassermelone": {"name": "🍉 Wassermelonen-Stück", "preis": 12, "hunger": -12, "typ": "food"},
-    "apfel_gruen": {"name": "🍏 Grüner Apfel", "preis": 15, "hunger": -15, "typ": "food"},
-    "banane": {"name": "🍌 Gelbe Banane", "preis": 15, "hunger": -15, "typ": "food"},
-    "birne": {"name": "🍐 Flussbirne", "preis": 18, "hunger": -18, "typ": "food"},
-    "pflaume": {"name": "🫐 Pflaume", "preis": 18, "hunger": -18, "typ": "food"},
-    "pfirsich": {"name": "🍑 Pfirsich", "preis": 20, "hunger": -20, "typ": "food"},
-    "karotte": {"name": "🥕 Karotte", "preis": 22, "hunger": -22, "typ": "food"},
-    "gurke": {"name": "🥒 Gurkenscheibe", "preis": 22, "hunger": -22, "typ": "food"},
-    "tomate": {"name": "🍅 Tomate", "preis": 25, "hunger": -25, "typ": "food"},
-    "radieschen": {"name": "🥗 Radieschen", "preis": 25, "hunger": -25, "typ": "food"},
-    "salat": {"name": "🥬 Salatblatt", "preis": 30, "hunger": -25, "typ": "food"},
-    "baguette": {"name": "🥖 Frisches Baguette", "preis": 35, "hunger": -30, "typ": "food"},
-    "vollkornbrot": {"name": "🍞 Vollkornbrot", "preis": 38, "hunger": -32, "typ": "food"},
-    "brezel": {"name": "🥨 Brezel", "preis": 40, "hunger": -35, "typ": "food"},
-    "kaesebrot": {"name": "🧀 Käsebrot", "preis": 45, "hunger": -40, "typ": "food"},
-    "ruehrei": {"name": "🍳 Rührei", "preis": 50, "hunger": -45, "typ": "food"},
-    "kartoffelsalat": {"name": "🥗 Kartoffelsalat", "preis": 55, "hunger": -50, "typ": "food"},
-    "spaghetti": {"name": "🍝 Spaghetti Bolognese", "preis": 60, "hunger": -55, "typ": "food"},
-    "gemuesesuppe": {"name": "🥣 Gemüsesuppe", "preis": 65, "hunger": -55, "typ": "food"},
-    "reispfanne": {"name": "🍛 Reispfanne", "preis": 70, "hunger": -60, "typ": "food"},
-    "haehnchen": {"name": "🍗 Hähnchenschenkel", "preis": 75, "hunger": -60, "typ": "food"},
-    "fischstaebchen": {"name": "🐟 Fischstäbchen", "preis": 80, "hunger": -65, "typ": "food"},
-    "lachs": {"name": "🍣 Lachsfilet", "preis": 85, "hunger": -65, "typ": "food"},
-    "sandwich": {"name": "🥪 Thunfisch-Sandwich", "preis": 85, "hunger": -65, "typ": "food"},
-    "spaetzle": {"name": "🍜 Käse-Spätzle", "preis": 90, "hunger": -70, "typ": "food"},
-    "pommes": {"name": "🍟 Pommes Rot-Weiß", "preis": 90, "hunger": -70, "typ": "food"},
-    "donut": {"name": "🍩 Schokorand-Donut", "preis": 40, "hunger": -35, "typ": "food"},
-    "zuckerwatte": {"name": "🍭 Zuckerwatte", "preis": 45, "hunger": -35, "typ": "food"},
-    "muffin": {"name": "🧁 Muffin", "preis": 50, "hunger": -40, "typ": "food"},
-    "erdbeerkuchen": {"name": "🍰 Erdbeerkuchen", "preis": 65, "hunger": -50, "typ": "food"},
-    "schokolade": {"name": "🍫 Schokoladentafel", "preis": 70, "hunger": -50, "typ": "food"},
-    "gummibaerchen": {"name": "🧸 Gummibärchen", "preis": 75, "hunger": -55, "typ": "food"},
-    "hamburger": {"name": "🍔 Hamburger", "preis": 100, "hunger": -70, "typ": "food"},
-    "cheeseburger": {"name": "🧀 Cheeseburger", "preis": 110, "hunger": -72, "typ": "food"},
-    "hotdog": {"name": "🌭 Hotdog", "preis": 115, "hunger": -75, "typ": "food"},
-    "taco": {"name": "🌮 Knusprige Taco-Schale", "preis": 120, "hunger": -75, "typ": "food"},
-}
-
-SAMMLER_ITEMS = {
-    "statue": {"name": "🗿 Antike Marmor-Statue", "preis": 15000, "wert": 15000, "typ": "collector", "premium": False},
-    "vase": {"name": "🏺 Goldene Pharaonen-Vase", "preis": 35000, "wert": 35000, "typ": "collector", "premium": False},
-    "gemaelde": {"name": "🖼️ Das geheimnisvolle Gemälde", "preis": 75000, "wert": 75000, "typ": "collector", "premium": False},
-    "excalibur": {"name": "⚔️ Königsschwert Excalibur", "preis": 150000, "wert": 150000, "typ": "collector", "premium": True},
-    "astral_diamant": {"name": "💎 Funkelnder Astral-Diamant", "preis": 300000, "wert": 300000, "typ": "collector", "premium": True},
-    "kaiserkrone": {"name": "👑 Kaiserkrone von Nightleon1", "preis": 1000000, "wert": 1000000, "typ": "collector", "premium": True}
-}
-
-ALL_ITEMS = {**NAHRUNG_ITEMS, **SAMMLER_ITEMS}
-
-PREMIUM_WELTEN = {
-    "chronos": {"name": "⏳ Der Chronos-Riss", "min_level": 15, "boss": "🕒 Temporaler Wächter", "boss_hp": 350, "belohnung_min": 800, "belohnung_max": 1500},
-    "astral": {"name": "🌌 Die Astral-Ebene", "min_level": 25, "boss": "✨ Sternen-Phönix", "boss_hp": 600, "belohnung_min": 1800, "belohnung_max": 3000},
-    "obsidian": {"name": "🌋 Die Obsidian-Hölle", "min_level": 40, "boss": "🔥 Höllenfürst Malakor", "boss_hp": 1200, "belohnung_min": 5000, "belohnung_max": 8500}
-}
-
-# ─── UTILS ─────────────────────────────────────────────────
+# ─── HELFER-FUNKTIONEN ─────────────────────────────────────
 def erstelle_embed(titel: str, beschreibung: str, farbe: int) -> discord.Embed:
     return discord.Embed(title=titel, description=beschreibung, color=farbe, timestamp=datetime.now(timezone.utc))
 
 def fehler_embed(text: str) -> discord.Embed:
     return erstelle_embed("❌ Fehler", text, BotFarben.FEHLER)
 
-def xp_hinzufuegen(user_id: str, menge: int) -> bool:
+def xp_geben(user_id: str, menge: int = 5) -> bool:
     u = state.get_user(user_id)
     if state.ist_premium(user_id):
-        menge = int(menge * 1.25)  
-        
+        menge = int(menge * 1.25) # +25% XP Bonus
     u.xp += menge
     u.gesamt_xp += menge
     benoetigt = u.level * 100
     level_up = False
-    
     while u.xp >= benoetigt:
         u.xp -= benoetigt
         u.level += 1
         bonus = u.level * 50
-        if state.ist_premium(user_id): 
-            bonus = int(bonus * 1.25)  
+        if state.ist_premium(user_id): bonus = int(bonus * 1.25)
         u.muenzen += bonus
         benoetigt = u.level * 100
         level_up = True
     return level_up
 
-def hole_sortierte_liste(kategorie: str, scope: str, guild_id: Optional[int] = None) -> list:
-    gefilterte_liste = []
-    for u_id, u_profile in state.user_daten.items():
-        if scope == "server" and (u_profile.server_id != guild_id):
-            continue
-            
-        if kategorie == "level":
-            wert = u_profile.level
-            sub_wert = u_profile.xp
-        elif kategorie == "money":
-            wert = u_profile.muenzen
-            sub_wert = u_profile.level
-        elif kategorie == "collector":
-            wert = sum(SAMMLER_ITEMS[iid]["wert"] * anz for iid, anz in u_profile.inventar.items() if iid in SAMMLER_ITEMS)
-            sub_wert = u_profile.muenzen
-            
-        if wert > 0 or kategorie != "collector":
-            gefilterte_liste.append({
-                "id": int(u_id),
-                "wert": wert,
-                "sub_wert": sub_wert,
-                "premium": state.ist_premium(u_id),
-                "titel": u_profile.premium_titel
-            })
-            
-    gefilterte_liste.sort(key=lambda x: (x["wert"], x["sub_wert"]), reverse=True)
-    return gefilterte_liste
+def generiere_fortschrittsbalken(aktuell: int, max_wert: int, balken_laenge: int = 10) -> str:
+    if max_wert <= 0: return "⬜" * balken_laenge + " 0%"
+    prozent = min(1.0, max(0.0, aktuell / max_wert))
+    gefuellt = int(prozent * balken_laenge)
+    leer = balken_laenge - gefuellt
+    return f"{'🟩' * gefuellt}{'⬜' * leer} {int(prozent * 100)}%"
 
-def berechne_ehe_zinsen(user_id: str) -> int:
-    u = state.get_user(user_id)
-    if not u.partner_id or u.ehe_konto <= 0:
-        return 0
-    if not (state.ist_premium(user_id) or state.ist_premium(u.partner_id)):
-        return 0
-        
-    jetzt = datetime.now(timezone.utc)
-    if not u.letzter_zins_claim:
-        u.letzter_zins_claim = jetzt.isoformat()
-        state.speichern()
-        return 0
-        
-    letzter_claim = datetime.fromisoformat(u.letzter_zins_claim)
-    tage = (jetzt - letzter_claim).days
-    
-    if tage >= 1:
-        zins_satz = 0.02
-        gesamt_zins = 0
-        konto_stand = u.ehe_konto
-        for _ in range(min(tage, 30)):
-            täglicher_zins = min(int(konto_stand * zins_satz), 500)
-            gesamt_zins += täglicher_zins
-            konto_stand += täglicher_zins
-        return gesamt_zins
-    return 0
+async def check_und_vergebe_rollen(member: discord.Member, level: int, channel: discord.TextChannel):
+    if level in LEVEL_ROLLEN_BELOHNUNGEN:
+        rollen_name = LEVEL_ROLLEN_BELOHNUNGEN[level]
+        rolle = discord.utils.get(member.guild.roles, name=rollen_name)
+        if rolle:
+            try:
+                await member.add_roles(rolle)
+                await channel.send(embed=erstelle_embed("🎖️ Neue Level-Rolle!", f"Herzlichen Glückwunsch {member.mention}!\nDu hast Level **{level}** erreicht und erhältst die Rolle **{rolle.name}**!", BotFarben.ERFOLG))
+            except discord.Forbidden:
+                pass
 
-# ─── SHOP UI COMPONENTS ────────────────────────────────────
-class ItemKaufDropdown(discord.ui.Select):
-    def __init__(self, items_dict: dict, placeholder_text: str, user_premium: bool):
-        options = [
-            discord.SelectOption(
-                label=f"{'⭐ [VIP] ' if i.get('premium', False) else ''}{i['name']}", 
-                description=f"Preis: {i['preis']} Münzen", 
-                value=k
-            ) for k, i in items_dict.items()
-        ]
-        super().__init__(placeholder=placeholder_text, min_values=1, max_values=1, options=options[:25])
+async def groq_anfrage(messages: list) -> str:
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": "llama-3.3-70b-versatile", "messages": messages, "max_tokens": 800}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(GROQ_URL, headers=headers, json=payload, timeout=25) as resp:
+            if resp.status != 200: raise Exception(f"API-Fehler")
+            data = await resp.json()
+            return data["choices"][0]["message"]["content"]
 
-    async def callback(self, interaction: discord.Interaction):
-        item_id = self.values[0]
-        item = ALL_ITEMS[item_id]
-        u_id = str(interaction.user.id)
-        u = state.get_user(u_id, server_id=interaction.guild_id)
-        
-        if item.get("premium", False) and not state.ist_premium(u_id):
-            return await interaction.response.send_message(embed=fehler_embed("Dieses seltene Sammlerstück ist exklusiv für Premium-Mitglieder!"), ephemeral=True)
-            
-        if u.muenzen < item["preis"]:
-            return await interaction.response.send_message(embed=fehler_embed(f"Du hast nicht genug Geld! Dir fehlen {item['preis'] - u.muenzen} Münzen."), ephemeral=True)
-            
-        u.muenzen -= item["preis"]
-        u.inventar[item_id] = u.inventar.get(item_id, 0) + 1
-        state.speichern()
-        
-        await interaction.response.send_message(
-            embed=erstelle_embed("🛒 Kauf erfolgreich!", f"Du hast **{item['name']}** für **{item['preis']} Münzen** gekauft!", BotFarben.ERFOLG),
-            ephemeral=True
-        )
+# ─── UI INTERAKTIONS-KOMPONENTEN ───────────────────────────
+class ShopView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+    async def handle_buy(self, interaction: discord.Interaction, item_id: str):
+        u = state.get_user(str(interaction.user.id)); item = SHOP_ITEMS[item_id]
+        if u.muenzen < item["preis"]: return await interaction.response.send_message(embed=fehler_embed("Dein Geld reicht dafür nicht."), ephemeral=True)
+        u.muenzen -= item["preis"]; u.inventar[item_id] = u.inventar.get(item_id, 0) + 1; state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("🛒 Gekauft", f"Du hast {item['name']} für **{item['preis']} Münzen** gekauft!", BotFarben.ERFOLG), ephemeral=True)
 
-class MegaShopView(discord.ui.View):
-    def __init__(self, user_premium: bool, kategorie: str):
-        super().__init__(timeout=120)
-        if kategorie == "food":
-            all_food = list(NAHRUNG_ITEMS.items())
-            self.add_item(ItemKaufDropdown(dict(all_food[:20]), "🍏 Snacks & Kleines kaufen...", user_premium))
-            self.add_item(ItemKaufDropdown(dict(all_food[20:]), "🍔 Mahlzeiten & Fast-Food kaufen...", user_premium))
-        elif kategorie == "collector":
-            self.add_item(ItemKaufDropdown(SAMMLER_ITEMS, "👑 Teure Statussymbole & Relikte...", user_premium))
+    @discord.ui.button(label="🍪 Kekse", style=discord.ButtonStyle.secondary, custom_id="persistent:kekse")
+    async def buy_kekse(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_buy(interaction, "kekse")
+    @discord.ui.button(label="🥩 Premium Steak", style=discord.ButtonStyle.secondary, custom_id="persistent:steak")
+    async def buy_steak(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_buy(interaction, "steak")
+    @discord.ui.button(label="🍼 Milchflasche", style=discord.ButtonStyle.secondary, custom_id="persistent:milch")
+    async def buy_milch(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_buy(interaction, "milch")
 
-# ─── DISCORD BOT CORE ──────────────────────────────────────
-class PremiumCoreBot(discord.Client):
+class ToolSelect(discord.ui.Select):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        options = [discord.SelectOption(label=i["name"], description=f"{i['preis']} Münzen", value=k) for k, i in SHOP_ITEMS.items() if i.get("typ") == "tool"]
+        super().__init__(placeholder="Wähle eine Spitzhacke zum Kaufen...", min_values=1, max_values=1, options=options)
+    async def callback(self, interaction: discord.Interaction):
+        u = state.get_user(str(interaction.user.id)); item = SHOP_ITEMS[self.values[0]]
+        if u.muenzen < item["preis"]: return await interaction.response.send_message(embed=fehler_embed(f"Du brauchst **{item['preis']} Münzen**!"), ephemeral=True)
+        u.muenzen -= item["preis"]; u.aktive_hacke = self.values[0]; u.hacke_haltbarkeit = item["max_uses"]; state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("🛒 Werkzeug gekauft!", f"Du hast die **{item['name']}** gekauft und ausgerüstet!", BotFarben.ERFOLG), ephemeral=True)
 
-    async def setup_hook(self):
-        await self.tree.sync()
+class PersonaView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        options = [
+            discord.SelectOption(label="Standard", emoji="🤖", value="standard"),
+            discord.SelectOption(label="Pirat", emoji="🏴‍☠️", value="pirat"),
+            discord.SelectOption(label="Lehrer", emoji="👨‍🏫", value="lehrer")
+        ]
+        self.add_item(discord.ui.Select(placeholder="Wähle eine KI-Persönlichkeit...", options=options))
 
-bot = PremiumCoreBot()
+# ─── BOT KLASSE & INITIALISIERUNG ─────────────────────────
+class MyBot(discord.Client):
+    def __init__(self):
+        intents = discord.Intents.default(); intents.message_content = True; intents.members = True
+        super().__init__(intents=intents); self.tree = app_commands.CommandTree(self)
+    async def setup_hook(self): self.add_view(ShopView()); await self.tree.sync()
+
+bot = MyBot()
 
 @bot.event
-async def on_ready():
-    print(f"💎 System vollständig geladen! Bereit als {bot.user.name} (Owner-ID aktiv)")
+async def on_ready(): print(f"🤖 Bot läuft! Eingeloggt als Owner-ID-System.")
 
 @bot.event
 async def on_message(message):
-    if message.author.bot or not message.guild: 
-        return
-    user_id = str(message.author.id)
-    state.get_user(user_id, server_id=message.guild.id)
-    
+    if message.author.bot or not message.guild: return
+    user_id = str(message.author.id); u = state.get_user(user_id)
     if len(message.content) > 3 and not message.content.startswith("/"):
-        if xp_hinzufuegen(user_id, 3):
-            u = state.get_user(user_id)
-            state.speichern()
-            await message.channel.send(f"🎉 **Level Up!** {message.author.mention} hat Stufe **{u.level}** erreicht!")
+        if xp_geben(user_id, random.randint(2, 5)):
+            bonus_coins = u.level * 50
+            if state.ist_premium(user_id): bonus_coins = int(bonus_coins * 1.25)
+            await message.channel.send(embed=erstelle_embed("🎉 Level Up!", f"{message.author.mention} ist nun **Level {u.level}**!", BotFarben.ERFOLG))
+        # Passiver Münz-Zufallsgewinn (+25% falls Premium)
+        if random.random() < 0.20:
+            c = random.randint(1, 5)
+            if state.ist_premium(user_id): c = int(c * 1.25)
+            u.muenzen += c
 
-# ─── OWNER SYSTEM COMMANDS ──────────────────────────────────
-@bot.tree.command(name="premium-give", description="Schaltet den Premium-Status zeitbasiert frei (Nur Owner).")
+# ─── HILFE COMMANDS ────────────────────────────────────────
+@bot.tree.command(name="hilfe", description="Zeigt alle normalen Befehle.")
+async def hilfe(interaction: discord.Interaction):
+    embed = discord.Embed(title="⚙️ Hilfecenter", color=BotFarben.INFO)
+    embed.add_field(name="🪙 Wirtschaft & Bank", value="`/money` · `/daily` · `/work` · `/mine` · `/sell` · `/shop` · `/inventory` · `/pay` · `/family-bank`", inline=False)
+    embed.add_field(name="🐾 Haustiere", value="`/pet-adopt` · `/pet-status` · `/pet-feed` · `/pet-train` · `/pet-pet` · `/pet-explore` · `/pet-bossfight` · `/pet-duel` · `/pet-leaderboard`", inline=False)
+    embed.add_field(name="💞 Familie & Interaktion", value="`/ship` · `/marry` · `/divorce` · `/marry-status` · `/love` · `/family` · `/baby-feed` · `/baby-play` · `/cuddle` · `/kiss`", inline=False)
+    embed.add_field(name="🎮 Unterhaltung & KI", value="`/quiz` · `/coinflip` · `/schere-stein` · `/zahlen-raten` · `/ki` · `/persönlichkeit` · `/rank` · `/leaderboard` · `/todo`", inline=False)
+    embed.set_footer(text="💎 Premium-Mitglieder nutzen /hilfe-premium für exklusive Befehle!")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="hilfe-premium", description="Zeigt exklusive Premium-Befehle (Nur für VIPs).")
+async def hilfe_premium(interaction: discord.Interaction):
+    if not state.ist_premium(str(interaction.user.id)) and interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message(embed=fehler_embed("Dieses Hilfemenü ist exklusiv für Premium-Mitglieder!"), ephemeral=True)
+    
+    embed = discord.Embed(title="💎 VIP Gold-Hilfecenter", description="Willkommen im Premium-Bereich! Hier sind deine Privilegien:", color=BotFarben.PREMIUM)
+    embed.add_field(name="📈 Passive Boni", value="• **+25% mehr Münzen** bei `/work`, `/mine` & `/daily`.\n• **+25% schnelleres Leveln** bei allen Aktivitäten.", inline=False)
+    embed.add_field(name="🗺️ Abenteuer & Bosse (Premium)", value="• Welten im Krater, Schloss oder Chronos-Riss über `/pet-explore`.\n• Epische Endgame-Bosse über `/pet-bossfight`.", inline=False)
+    embed.add_field(name="🐾 VIP Zucht", value="Exklusive Tiere adoptieren: *Pegasus, Schattenwolf, Mecha-Greif, Leviathan, Kosmische Katze*.", inline=False)
+    embed.add_field(name="🎭 10 Premium-Roleplay Befehle", value=(
+        "`/premium-residenz` · `/premium-gift` · `/premium-flex` · `/premium-tea`\n"
+        "`/premium-oracle` · `/premium-title` · `/premium-aura` · `/premium-clandance`\n"
+        "`/premium-disguise` · `/premium-dice`"
+    ), inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# ─── ADMIN- & OWNER-SYSTEM (NIGHTLEON1) ───────────────────
+@bot.tree.command(name="premium-give", description="Vergibt Premium-Status an einen User (Nur Owner Nightleon1).")
 @app_commands.choices(paket=[
-    app_commands.Choice(name="1 Monat (30 Tage)", value="1m"),
-    app_commands.Choice(name="3 Monate (90 Tage)", value="3m"),
-    app_commands.Choice(name="6 Monate (180 Tage)", value="6m"),
-    app_commands.Choice(name="Permanent (Lebenslang)", value="perm")
+    app_commands.Choice(name="1 Monat", value="1m"),
+    app_commands.Choice(name="3 Monate", value="3m"),
+    app_commands.Choice(name="6 Monate", value="6m"),
+    app_commands.Choice(name="Permanent", value="perm")
 ])
 async def premium_give(interaction: discord.Interaction, user: discord.User, paket: app_commands.Choice[str]):
     if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message(embed=fehler_embed("Du bist nicht der Owner!"), ephemeral=True)
+        return await interaction.response.send_message(embed=fehler_embed("Du bist nicht der Owner (Nightleon1)! Befehl verweigert."), ephemeral=True)
     
-    u = state.get_user(str(user.id), server_id=interaction.guild_id)
+    u = state.get_user(str(user.id))
     jetzt = datetime.now(timezone.utc)
     
-    if paket.value == "1m": u.premium_bis = (jetzt + timedelta(days=30)).isoformat()
-    elif paket.value == "3m": u.premium_bis = (jetzt + timedelta(days=90)).isoformat()
-    elif paket.value == "6m": u.premium_bis = (jetzt + timedelta(days=180)).isoformat()
-    elif paket.value == "perm": u.premium_bis = "permanent"
+    if paket.value == "1m":
+        bis = jetzt + timedelta(days=30); u.premium_bis = bis.isoformat()
+    elif paket.value == "3m":
+        bis = jetzt + timedelta(days=90); u.premium_bis = bis.isoformat()
+    elif paket.value == "6m":
+        bis = jetzt + timedelta(days=180); u.premium_bis = bis.isoformat()
+    else:
+        u.premium_bis = "permanent"
         
     state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("💎 Premium aktiviert!", f"Laufzeit für {user.mention}: **{paket.name}**\n📈 Passive +25% Boosts sind aktiv!", BotFarben.PREMIUM))
-
-@bot.tree.command(name="premium-remove", description="Entzieht einem User sämtliche Premium-Rechte (Nur Owner).")
-async def premium_remove(interaction: discord.Interaction, user: discord.User):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message(embed=fehler_embed("Zugriff verweigert."), ephemeral=True)
-    u.premium_bis = None
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("🗑️ Premium beendet", f"VIP-Rechte für {user.mention} gelöscht.", BotFarben.FEHLER))
-
-@bot.tree.command(name="premium-status", description="Überprüft deine restliche VIP-Laufzeit.")
-async def premium_status(interaction: discord.Interaction):
-    u_id = str(interaction.user.id)
-    u = state.get_user(u_id, server_id=interaction.guild_id)
-    if not state.ist_premium(u_id):
-        return await interaction.response.send_message(embed=erstelle_embed("🕊️ Premium-Status", "Du besitzt aktuell kein aktives Premium-Paket.", BotFarben.INFO), ephemeral=True)
-    zeit_anzeige = "∞ Lebenslang" if u.premium_bis == "permanent" else f"{datetime.fromisoformat(u.premium_bis).strftime('%d.%m.%Y um %H:%M UTC')}"
-    await interaction.response.send_message(embed=erstelle_embed("💎 VIP-Status", f"Status: **AKTIV**\nLaufzeit bis: **{zeit_anzeige}**", BotFarben.PREMIUM))
-
-# ─── WIRTSCHAFTS- & SHOP-COMMANDS ───────────────────────────
-@bot.tree.command(name="shop", description="Öffnet den Marktplatz.")
-@app_commands.choices(kategorie=[
-    app_commands.Choice(name="🍏 Nahrungsmittel (40+ Items)", value="food"),
-    app_commands.Choice(name="👑 Luxus-Sammlerstücke (Prestige)", value="collector")
-])
-async def shop(interaction: discord.Interaction, kategorie: app_commands.Choice[str]):
-    view = MegaShopView(user_premium=state.ist_premium(str(interaction.user.id)), kategorie=kategorie.value)
-    embed = erstelle_embed("🛒 Shop", f"Wähle deine Kategorie: **{kategorie.name}**", BotFarben.WIRTSCHAFT if kategorie.value == "food" else BotFarben.PREMIUM)
-    await interaction.response.send_message(embed=embed, view=view)
-
-@bot.tree.command(name="inventory", description="Zeigt deine Gegenstände.")
-async def inventory(interaction: discord.Interaction):
-    u = state.get_user(str(interaction.user.id), server_id=interaction.guild_id)
-    food, coll, gesamt = [], [], 0
-    for iid, anz in u.inventar.items():
-        if anz <= 0: continue
-        if iid in NAHRUNG_ITEMS: food.append(f"• {NAHRUNG_ITEMS[iid]['name']} x**{anz}**")
-        elif iid in SAMMLER_ITEMS:
-            coll.append(f"• {SAMMLER_ITEMS[iid]['name']} x**{anz}**")
-            gesamt += SAMMLER_ITEMS[iid]["wert"] * anz
-    embed = discord.Embed(title=f"🎒 Inventar von {interaction.user.name}", color=BotFarben.INFO)
-    if food: embed.add_field(name="🍏 Vorräte", value="\n".join(food), inline=False)
-    if coll: embed.add_field(name="🏛️ Sammlerstücke", value="\n".join(coll), inline=False)
-    if coll: embed.add_field(name="📊 Sammlungswert", value=f"`🪙 {gesamt:,} Münzen`", inline=False)
+    dur = paket.name
+    embed = erstelle_embed("💎 Premium aktiviert!", f"Der Owner hat {user.mention} den Premium-Status freigeschaltet!\n⏱️ Paket: **{dur}**", BotFarben.PREMIUM)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="item-give", description="Gibt Gegenstände an jemanden weiter.")
-async def item_give(interaction: discord.Interaction, empfaenger: discord.Member, item_id: str, anzahl: int = 1):
-    u = state.get_user(str(interaction.user.id)); empf = state.get_user(str(empfaenger.id))
-    if item_id not in ALL_ITEMS or u.inventar.get(item_id, 0) < anzahl or anzahl <= 0:
-        return await interaction.response.send_message(embed=fehler_embed("Ungültige Übergabe."), ephemeral=True)
-    u.inventar[item_id] -= anzahl; empf.inventar[item_id] = empf.inventar.get(item_id, 0) + anzahl
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("📦 Item-Transfer", f"{anzahl}x {ALL_ITEMS[item_id]['name']} an {empfaenger.mention} übergeben!", BotFarben.ERFOLG))
-
-# ─── RANKINGS / LEADERBOARD COMMANDS ────────────────────────
-@bot.tree.command(name="leaderboard", description="Zeigt die Bestenliste für Level oder Münzen.")
-@app_commands.choices(kategorie=[app_commands.Choice(name="Level", value="level"), app_commands.Choice(name="Münzen", value="money")])
-@app_commands.choices(typ=[app_commands.Choice(name="Server", value="server"), app_commands.Choice(name="Global", value="global")])
-@app_commands.choices(plaetze=[app_commands.Choice(name="Top 10", value=10), app_commands.Choice(name="Top 25", value=25), app_commands.Choice(name="Top 50", value=50)])
-async def leaderboard(interaction: discord.Interaction, kategorie: app_commands.Choice[str], typ: app_commands.Choice[str], plaetze: app_commands.Choice[int]):
-    await interaction.response.defer()
-    daten = hole_sortierte_liste(kategorie.value, typ.value, interaction.guild_id)[:plaetze.value]
-    zeilen = [f"{'🥇' if i==0 else '🥈' if i==1 else '🥉' if i==2 else f'`#{i+1:02d}`'} {'💎 ' if d['premium'] else ''}<@{d['id']}> — " + (f"Lvl **{d['wert']}**" if kategorie.value == "level" else f"`🪙 {d['wert']:,}`") for i, d in enumerate(daten)]
-    embed = discord.Embed(title=f"🏆 Top {len(daten)} Ranking ({typ.name})", color=BotFarben.PREMIUM if typ.value == "global" else BotFarben.INFO)
-    embed.description = "\n".join(zeilen) if len("\n".join(zeilen)) <= 4000 else "Liste zu lang zum Darstellen."
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="leaderboard-sammler", description="Bestenliste des Sammlungswertes.")
-@app_commands.choices(typ=[app_commands.Choice(name="Server", value="server"), app_commands.Choice(name="Global", value="global")])
-@app_commands.choices(plaetze=[app_commands.Choice(name="Top 10", value=10), app_commands.Choice(name="Top 25", value=25), app_commands.Choice(name="Top 50", value=50)])
-async def leaderboard_sammler(interaction: discord.Interaction, typ: app_commands.Choice[str], plaetze: app_commands.Choice[int]):
-    await interaction.response.defer()
-    daten = hole_sortierte_liste("collector", typ.value, interaction.guild_id)[:plaetze.value]
-    zeilen = [f"{'👑' if i==0 else '💎' if i==1 else '🔱' if i==2 else f'`#{i+1:02d}`'} {'✨ ' if d['premium'] else ''}<@{d['id']}>\n  ↳ Wert: **{d['wert']:,} Münzen**" for i, d in enumerate(daten)]
-    embed = discord.Embed(title=f"🏛️ Top {len(daten)} Antiquitäten-Sammler ({typ.name})", color=BotFarben.PREMIUM)
-    embed.description = "\n".join(zeilen) if len("\n".join(zeilen)) <= 4000 else "Liste zu lang."
-    await interaction.followup.send(embed=embed)
-
-# ─── PREMIUM FAMILY SYSTEMS ─────────────────────────────────
-@bot.tree.command(name="family-bank", description="Verwalte das gemeinsame Ehekonto.")
-@app_commands.choices(aktion=[app_commands.Choice(name="Prüfen", value="check"), app_commands.Choice(name="Einzahlen", value="deposit"), app_commands.Choice(name="Auszahlen", value="withdraw")])
-async def family_bank(interaction: discord.Interaction, aktion: app_commands.Choice[str], betrag: Optional[int] = None):
-    u_id = str(interaction.user.id); u = state.get_user(u_id)
-    if not u.partner_id: return await interaction.response.send_message(embed=fehler_embed("Du bist nicht verheiratet!"), ephemeral=True)
-    p = state.get_user(u.partner_id)
+@bot.tree.command(name="premium-remove", description="Entzieht Premium-Status (Nur Owner Nightleon1).")
+async def premium_remove(interaction: discord.Interaction, user: discord.User):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message(embed=fehler_embed("Du bist nicht der Owner!"), ephemeral=True)
     
-    zinsen = berechne_ehe_zinsen(u_id)
-    if zinsen > 0:
-        u.ehe_konto += zinsen; p.ehe_konto = u.ehe_konto
-        u.letzter_zins_claim = p.letzter_zins_claim = datetime.now(timezone.utc).isoformat()
-        await interaction.channel.send(f"📈 **VIP-Zinsen!** Das Ehekonto hat **{zinsen} Münzen** generiert!")
-
-    if aktion.value == "check":
-        return await interaction.response.send_message(embed=erstelle_embed("🏦 Ehekonto", f"Kontostand: `🪙 {u.ehe_konto:,} Münzen`", BotFarben.PREMIUM))
-    if betrag is None or betrag <= 0: return await interaction.response.send_message(embed=fehler_embed("Ungültiger Betrag."), ephemeral=True)
-
-    if aktion.value == "deposit":
-        if u.muenzen < betrag: return await interaction.response.send_message(embed=fehler_embed("Zu wenig Geld."), ephemeral=True)
-        u.muenzen -= betrag; u.ehe_konto += betrag; p.ehe_konto = u.ehe_konto
-    elif aktion.value == "withdraw":
-        if u.ehe_konto < betrag: return await interaction.response.send_message(embed=fehler_embed("Zu wenig Guthaben auf der Bank."), ephemeral=True)
-        u.ehe_konto -= betrag; u.muenzen += betrag; p.ehe_konto = u.ehe_konto
+    u = state.get_user(str(user.id))
+    u.premium_bis = None
     state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("🏦 Bank-Update", "Transaktion durchgeführt!", BotFarben.ERFOLG))
+    await interaction.response.send_message(embed=erstelle_embed("🗑️ Premium entzogen", f"{user.mention} hat keine VIP-Rechte mehr.", BotFarben.FEHLER))
 
-@bot.tree.command(name="premium-baby-academy", description="Schickt euer Kind auf das VIP-Elite-Internat.")
-async def baby_academy(interaction: discord.Interaction, kind_name: str):
-    u_id = str(interaction.user.id); u = state.get_user(u_id)
-    if not state.ist_premium(u_id) or kind_name not in u.kinder:
-        return await interaction.response.send_message(embed=fehler_embed("Fehler beim Zugriff oder kein VIP-Status."), ephemeral=True)
-    u.kinder[kind_name]["in_akademie_bis"] = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
-    u.kinder[kind_name]["level"] = u.kinder[kind_name].get("level", 1) + 1
-    u.kinder[kind_name]["hunger"] = 0
-    if u.partner_id: state.get_user(u.partner_id).kinder[kind_name] = u.kinder[kind_name]
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("🎓 VIP-Akademie", f"**{kind_name}** lernt im Internat und stieg direkt ein Level auf!", BotFarben.PREMIUM))
-
-@bot.tree.command(name="premium-family-vacation", description="VIP-Urlaub sättigt alle Kinder.")
-async def family_vacation(interaction: discord.Interaction):
-    u_id = str(interaction.user.id); u = state.get_user(u_id)
-    if not state.ist_premium(u_id) or not u.partner_id: return await interaction.response.send_message(embed=fehler_embed("Nur für verheiratete VIPs!"), ephemeral=True)
-    for k in u.kinder.values(): k["hunger"] = 0
-    if u.partner_id:
-        for k in state.get_user(u.partner_id).kinder.values(): k["hunger"] = 0
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("✈️ VIP-Urlaub", "Malediven-Reise beendet! Alle Kinder sind satt (0% Hunger).", BotFarben.PREMIUM))
-
-# ─── PREMIUM PET & BOSS SYSTEM ──────────────────────────────
-@bot.tree.command(name="premium-pet-adopt", description="Adoptiere ein Premium-Haustier.")
-@app_commands.choices(typ=[app_commands.Choice(name="Drache", value="Drache"), app_commands.Choice(name="Einhorn", value="Einhorn"), app_commands.Choice(name="Phönix-Löwe", value="Phönix-Löwe")])
-async def premium_pet_adopt(interaction: discord.Interaction, typ: app_commands.Choice[str], name: str):
+@bot.tree.command(name="premium-status", description="Zeigt die aktuelle Premium-Laufzeit an.")
+async def premium_status(interaction: discord.Interaction):
     u_id = str(interaction.user.id)
-    if not state.ist_premium(u_id) or u_id in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Nicht berechtigt oder bereits Tier vorhanden."), ephemeral=True)
-    state.pet_daten[u_id] = PetProfile(name=name, typ=typ.value, max_hp=150 if typ.value == "Einhorn" else 120, aktuelle_hp=120, atk=18 if typ.value == "Drache" else 14)
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("🐾 Adoption", f"Dein legendärer **{typ.value}** namens **{name}** wurde geboren!", BotFarben.PREMIUM))
-
-@bot.tree.command(name="premium-adventure", description="Kämpfe gegen Bosse in den Premium-Welten.")
-@app_commands.choices(welt=[app_commands.Choice(name="⏳ Chronos-Riss (Lvl 15)", value="chronos"), app_commands.Choice(name="🌌 Astral-Ebene (Lvl 25)", value="astral"), app_commands.Choice(name="🌋 Obsidian-Hölle (Lvl 40)", value="obsidian")])
-async def premium_adventure(interaction: discord.Interaction, welt: app_commands.Choice[str]):
-    u_id = str(interaction.user.id)
-    if not state.ist_premium(u_id) or u_id not in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Bedingungen nicht erfüllt."), ephemeral=True)
-    pet = state.pet_daten[u_id]; w_daten = PREMIUM_WELTEN[welt.value]
-    if pet.level < w_daten["min_level"] or pet.aktuelle_hp <= 20: return await interaction.response.send_message(embed=fehler_embed("Haustier zu schwach oder zu wenig HP."), ephemeral=True)
+    u = state.get_user(u_id)
+    if not state.ist_premium(u_id):
+        return await interaction.response.send_message(embed=erstelle_embed("🕊️ Premium-Status", "Du hast aktuell kein aktives Premium-Paket.", BotFarben.INFO), ephemeral=True)
     
-    await interaction.response.defer()
-    b_hp = w_daten["boss_hp"]
-    while b_hp > 0 and pet.aktuelle_hp > 0:
-        b_hp -= random.randint(pet.atk - 3, pet.atk + 7)
-        if b_hp <= 0: break
-        pet.aktuelle_hp -= random.randint(10, 25)
-
-    if b_hp <= 0:
-        beute = int(random.randint(w_daten["belohnung_min"], w_daten["belohnung_max"]) * 1.25)
-        state.get_user(u_id).muenzen += beute; pet.level += 1; pet.zufriedenheit = min(100, pet.zufriedenheit + 15)
-        pet.aktuelle_hp = max(10, pet.aktuelle_hp)
-        emb = erstelle_embed("⚔️ SIEG", f"**{pet.name}** bezwang den Boss!\n💰 Beute: `🪙 {beute:,} Münzen`\n📈 Stufe: Lvl **{pet.level}**", BotFarben.ERFOLG)
+    if u.premium_bis == "permanent":
+        zeit_text = "∞ Lebenslang (Permanent)"
     else:
-        pet.aktuelle_hp = 10; pet.zufriedenheit = max(0, pet.zufriedenheit - 20)
-        emb = erstelle_embed("💀 NIEDERLAGE", f"Der Boss war zu stark. {pet.name} musste verletzt fliehen.", BotFarben.FEHLER)
-    state.speichern()
-    await interaction.followup.send(embed=emb)
+        bis_dt = datetime.fromisoformat(u.premium_bis)
+        rest = bis_dt - datetime.now(timezone.utc)
+        zeit_text = f"{bis_dt.strftime('%d.%m.%Y')} ({rest.days} Tage verbleibend)"
+        
+    await interaction.response.send_message(embed=erstelle_embed("💎 Dein Premium-Status ist AKTIV", f"Auslaufdatum: **{zeit_text}**\nNutze `/hilfe-premium` für deine Vorteile!", BotFarben.PREMIUM))
 
-@bot.tree.command(name="premium-pet-heal", description="Heilt dein Tier kostenfrei auf.")
-async def premium_pet_heal(interaction: discord.Interaction):
+# ─── ANPASSUNGEN STANDARD-BEFEHLE (BONUS WIRTSCHAFT) ──────
+@bot.tree.command(name="daily", description="Tägliche Belohnung.")
+async def daily(interaction: discord.Interaction):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); jetzt = datetime.now(timezone.utc)
+    if u.letztes_daily:
+        if (jetzt - datetime.fromisoformat(u.letztes_daily)) < timedelta(days=1):
+            return await interaction.response.send_message(embed=fehler_embed("Schon abgeholt!"), ephemeral=True)
+            
+    geld = 75
+    text_add = ""
+    if state.ist_premium(u_id):
+        geld = int(geld * 1.25)
+        text_add = " *(inkl. +25% VIP-Bonus)*"
+        
+    u.letztes_daily = jetzt.isoformat(); u.muenzen += geld; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎁 Daily", f"Du hast **{geld} Münzen** erhalten!{text_add}", BotFarben.ERFOLG))
+
+@bot.tree.command(name="work", description="Arbeiten gehen.")
+@app_commands.choices(beruf=[app_commands.Choice(name="👷 Bauarbeiter", value="bau"), app_commands.Choice(name="💻 Programmierer", value="dev")])
+async def work(interaction: discord.Interaction, beruf: app_commands.Choice[str]):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); jetzt = datetime.now(timezone.utc)
+    if u.letzte_arbeit:
+        if (jetzt - datetime.fromisoformat(u.letzte_arbeit)) < timedelta(hours=1): 
+            return await interaction.response.send_message(embed=fehler_embed("Ruh dich aus!"), ephemeral=True)
+            
+    u.arbeits_erfahrung += 1
+    if u.arbeits_erfahrung >= u.berufs_stufe * 5: u.berufs_stufe += 1
+    mult = 1.0 + (u.berufs_stufe - 1) * 0.20
+    
+    if beruf.value == "bau":
+        lohn = int(random.randint(45, 65) * mult)
+        text = f"Schicht geschafft: **{lohn} Münzen**."
+    else:
+        if random.random() < 0.25: lohn = 0; text = "Absturz! **0 Münzen**."
+        else: lohn = int(random.randint(70, 140) * mult); text = f"Viral gegangen! **{lohn} Münzen**."
+            
+    if state.ist_premium(u_id) and lohn > 0:
+        lohn = int(lohn * 1.25)
+        text += " *(+25% VIP-Bonus)*"
+        
+    u.muenzen += lohn; u.letzte_arbeit = jetzt.isoformat(); state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("💼 Job", text, BotFarben.WIRTSCHAFT))
+
+# ─── HAUSTIER ADOPT, EXPLORE, BOSS (UPGRADED) ──────────────
+@bot.tree.command(name="pet-adopt", description="Adoptiere ein Haustier.")
+async def pet_adopt(interaction: discord.Interaction, typ: str, name: str):
+    u_id = str(interaction.user.id); u = state.get_user(u_id)
+    if u_id in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Du hast bereits ein Tier!"), ephemeral=True)
+    if typ not in PET_TYPEN: return await interaction.response.send_message(embed=fehler_embed("Tierart existiert nicht."), ephemeral=True)
+    
+    t_info = PET_TYPEN[typ]
+    if t_info["premium"] and not state.ist_premium(u_id):
+        return await interaction.response.send_message(embed=fehler_embed("Dieses Tier ist exklusiv für Premium-Mitglieder!"), ephemeral=True)
+        
+    if u.level < t_info["min_level"] or u.muenzen < t_info["preis"]:
+        return await interaction.response.send_message(embed=fehler_embed("Voraussetzungen (Level/Geld) nicht erfüllt."), ephemeral=True)
+        
+    u.muenzen -= t_info["preis"]
+    start_atk = 10 + t_info["atki_bonus"]
+    state.pet_daten[u_id] = PetProfile(name=name, typ=typ, atk=start_atk)
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🐾 Tier adoptiert!", f"Herzlichen Glückwunsch zu deinem **{name}** ({typ})!", BotFarben.ERFOLG))
+
+@bot.tree.command(name="pet-explore", description="Schicke dein Tier auf Erkundung.")
+async def pet_explore(interaction: discord.Interaction, gebiet: str):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); p = state.pet_daten.get(u_id)
+    if not p: return await interaction.response.send_message(embed=fehler_embed("Kein Tier."), ephemeral=True)
+    if gebiet not in ABENTEUER_GEBIETE: return await interaction.response.send_message(embed=fehler_embed("Gebiet existiert nicht."), ephemeral=True)
+    
+    g = ABENTEUER_GEBIETE[gebiet]
+    if g["premium"] and not state.ist_premium(u_id):
+        return await interaction.response.send_message(embed=fehler_embed("Diese Welt erfordert den Premium-Status!"), ephemeral=True)
+        
+    if p.level < g["min_level"]: return await interaction.response.send_message(embed=fehler_embed("Tier-Level zu niedrig."), ephemeral=True)
+    
+    # Ausführung des Abenteuers
+    schaden = max(0, random.randint(0, g["schaden_max"]) - p.level)
+    p.aktuelle_hp = max(1, p.aktuelle_hp - schaden)
+    loot = random.choice(g["looten"])
+    u.inventar[loot] = u.inventar.get(loot, 0) + 1
+    
+    if gebiet != "astral" and gebiet != "chronos": # In Astral & Chronos kein Hunger-Abzug
+        p.hunger = min(100, p.hunger + g["hunger_kosten"])
+        
+    state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed(f"🗺️ Erkundung: {g['name']}", f"Dein Tier brachte 1x **{loot}** zurück!\n💥 Erlitten: -{schaden} HP.", BotFarben.SPIEL))
+
+@bot.tree.command(name="pet-bossfight", description="Kämpfe gegen Bosse.")
+async def pet_bossfight(interaction: discord.Interaction, boss_index: int):
+    u_id = str(interaction.user.id); u = state.get_user(u_id); p = state.pet_daten.get(u_id)
+    if not p: return await interaction.response.send_message(embed=fehler_embed("Kein Tier."), ephemeral=True)
+    if boss_index < 0 or boss_index >= len(BOSS_GEGNER): return await interaction.response.send_message(embed=fehler_embed("Boss existiert nicht."), ephemeral=True)
+    
+    b = BOSS_GEGNER[boss_index]
+    if b["premium"] and not state.ist_premium(u_id):
+        return await interaction.response.send_message(embed=fehler_embed("Dieser Boss ist exklusiv für Premium-Mitglieder!"), ephemeral=True)
+        
+    if p.level < b["min_level"]: return await interaction.response.send_message(embed=fehler_embed("Tierstufe zu gering."), ephemeral=True)
+    
+    # Stark vereinfachte Kampf-Logik
+    if p.atk * 10 > b["hp"]:
+        m_bel = b["belohnung_muenzen"]
+        if state.ist_premium(u_id): m_bel = int(m_bel * 1.25)
+        u.muenzen += m_bel
+        xp_geben(u_id, b["xp"])
+        state.speichern()
+        await interaction.response.send_message(embed=erstelle_embed("🏆 Boss besiegt!", f"Sieg über {b['name']}! Belohnung: **+{m_bel} Münzen**.", BotFarben.ERFOLG))
+    else:
+        await interaction.response.send_message(embed=fehler_embed(f"Niederlage gegen {b['name']}! Trainiere weiter."))
+
+# ─── 10 NEUE EXKLUSIVE PREMIUM-ROLEPLAY BEFEHLE ─────────────
+@bot.tree.command(name="premium-residenz", description="Benenne dein eigenes virtuelles Luxus-Zuhause.")
+async def premium_residenz(interaction: discord.Interaction, name: str):
     u_id = str(interaction.user.id)
-    if not state.ist_premium(u_id) or u_id not in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Fehler."), ephemeral=True)
-    state.pet_daten[u_id].aktuelle_hp = state.pet_daten[u_id].max_hp
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("💖 Heilung", "Dein Haustier wurde komplett geheilt!", BotFarben.ERFOLG))
+    if not state.ist_premium(u_id): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    u = state.get_user(u_id)
+    u.premium_residenz_name = name; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🏰 Luxus-Residenz", f"{interaction.user.mention} hat seine Residenz feierlich auf den Namen **„{name}“** getauft!", BotFarben.PREMIUM))
 
-@bot.tree.command(name="premium-pet-rename", description="Benennt dein Premium-Tier um.")
-async def premium_pet_rename(interaction: discord.Interaction, neuer_name: str):
+@bot.tree.command(name="premium-gift", description="Verpacke ein Item edel und verschenke es.")
+async def premium_gift(interaction: discord.Interaction, empfaenger: discord.Member, item: str):
     u_id = str(interaction.user.id)
-    if not state.ist_premium(u_id) or u_id not in state.pet_daten: return await interaction.response.send_message(embed=fehler_embed("Mangelnde Rechte."), ephemeral=True)
-    state.pet_daten[u_id].name = neuer_name
-    state.speichern()
-    await interaction.response.send_message(embed=erstelle_embed("🏷️ Umbenannt", f"Neuer Name: **{neuer_name}**", BotFarben.ERFOLG))
+    if not state.ist_premium(u_id): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    u = state.get_user(u_id); empf = state.get_user(str(empfaenger.id))
+    if u.inventar.get(item, 0) <= 0: return await interaction.response.send_message(embed=fehler_embed("Du hast dieses Item nicht."), ephemeral=True)
+    
+    u.inventar[item] -= 1; empf.inventar[item] = empf.inventar.get(item, 0) + 1; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎁 VIP-Geschenk", f"✨ {interaction.user.mention} überreicht {empfaenger.mention} eine edel funkelnde Premium-Geschenkbox mit **1x {item}**! 🎉", BotFarben.PREMIUM))
 
-if __name__ == "__main__":
-    bot.run(DISCORD_TOKEN)
+@bot.tree.command(name="premium-flex", description="Protze im Chat mit deinem Reichtum.")
+async def premium_flex(interaction: discord.Interaction):
+    if not state.ist_premium(str(interaction.user.id)): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    u = state.get_user(str(interaction.user.id))
+    sprueche = [
+        f"lässt seine **{u.muenzen} Münzen** so laut klimpern, dass der gesamte Server wegschaut! 🪙😎",
+        f"winkt lässig mit Geldscheinen und bestellt Champagner für das gesamte Haustiergehege! 🥂",
+        f"zeigt stolz sein High-End Equipment. Eure Armut widert ihn dezent an! 💎🛡️"
+    ]
+    await interaction.response.send_message(f"👑 **[VIP Flex]** {interaction.user.mention} {random.choice(sprueche)}")
+
+@bot.tree.command(name="premium-tea", description="Lade jemanden in die VIP-Lounge ein (+Bonus XP).")
+async def premium_tea(interaction: discord.Interaction, gast: discord.Member):
+    if not state.ist_premium(str(interaction.user.id)): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    xp_geben(str(interaction.user.id), 25); xp_geben(str(gast.id), 25)
+    await interaction.response.send_message(embed=erstelle_embed("☕ VIP-Lounge", f"🫖 {interaction.user.mention} hat {gast.mention} zu einer exquisiten Tasse Tee in den VIP-Salon eingeladen. Beide erhalten **+25 XP** für die feine Konversation!", BotFarben.PREMIUM))
+
+@bot.tree.command(name="premium-oracle", description="Befrage das Premium-Orakel nach deiner Zukunft.")
+async def premium_oracle(interaction: discord.Interaction):
+    if not state.ist_premium(str(interaction.user.id)): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    await interaction.response.defer()
+    weisheiten = [
+        "Die Sterne stehen günstig. Dein Haustier wird bald legendäre Reichtümer finden!",
+        "Ein dunkler Schatten nähert sich der Mine... Nimm beim nächsten Mal eine stärkere Hacke mit!",
+        "Die kosmischen Ströme besagen: Deine nächste Ehe-Überweisung wird vom Glück gesegnet sein."
+    ]
+    await interaction.followup.send(embed=erstelle_embed("🔮 Das Premium-Orakel spricht", random.choice(weisheiten), BotFarben.PREMIUM))
+
+@bot.tree.command(name="premium-title", description="Lege einen Suffix-Prestige-Titel fest.")
+async def premium_title(interaction: discord.Interaction, titel: str):
+    u_id = str(interaction.user.id)
+    if not state.ist_premium(u_id): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    u = state.get_user(u_id); u.premium_titel = titel; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎖️ Titel vergeben", f"Dein Profil trägt nun den Prestige-Titel: `[{titel}]`", BotFarben.PREMIUM))
+
+@bot.tree.command(name="premium-aura", description="Aktiviere eine leuchtende magische Aura.")
+@app_commands.choices(aura=[app_commands.Choice(name="🔥 Feuer", value="Feuer"), app_commands.Choice(name="⚡ Neon", value="Neon"), app_commands.Choice(name="🌌 Astral", value="Astral")])
+async def premium_aura(interaction: discord.Interaction, aura: app_commands.Choice[str]):
+    u_id = str(interaction.user.id)
+    if not state.ist_premium(u_id): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    u = state.get_user(u_id); u.premium_aura = aura.value; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("✨ Aura entfesselt", f"Dich umgibt nun die mystische **{aura.value}-Aura**!", BotFarben.PREMIUM))
+
+@bot.tree.command(name="premium-clandance", description="Starte einen VIP-Siegestanz mit einem Freund.")
+async def premium_clandance(interaction: discord.Interaction, partner: discord.Member):
+    if not state.ist_premium(str(interaction.user.id)): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    await interaction.response.send_message(f"💃🕺 **[VIP-Tanz]** {interaction.user.mention} und {partner.mention} vollführen einen perfekt synchronisierten, golden funkelnden Ritualtanz im Chat! Die Menge tobt! 💫")
+
+@bot.tree.command(name="premium-disguise", description="Verkleide dein Tier kosmetisch.")
+async def premium_disguise(interaction: discord.Interaction, verkleidung: str):
+    u_id = str(interaction.user.id); p = state.pet_daten.get(u_id)
+    if not state.ist_premium(u_id): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    if not p: return await interaction.response.send_message(embed=fehler_embed("Kein Tier vorhanden."), ephemeral=True)
+    
+    p.premium_verkleidung = verkleidung; state.speichern()
+    await interaction.response.send_message(embed=erstelle_embed("🎭 Haustier-Kostüm", f"**{p.name}** trägt nun das exklusive Kostüm: **{verkleidung}**!", BotFarben.PREMIUM))
+
+@bot.tree.command(name="premium-dice", description="High-Stakes VIP Würfelspiel.")
+async def premium_dice(interaction: discord.Interaction):
+    if not state.ist_premium(str(interaction.user.id)): return await interaction.response.send_message(embed=fehler_embed("Nur für VIPs!"), ephemeral=True)
+    w1, w2 = random.randint(1, 6), random.randint(1, 6)
+    ges = w1 + w2
+    await interaction.response.send_message(embed=erstelle_embed("🎲 VIP-Würfel", f"Du hast gewürfelt: ⚀ **{w1}** und ⚁ **{w2}**.\nGesamtergebnis: **{ges}**!", BotFarben.PREMIUM))
+
+# ─── PROFILKARTE ERWEITERUNG ──────────────────────────────
+@bot.tree.command(name="rank", description="Zeigt deine Profil-Karte.")
+async def rank(interaction: discord.Interaction):
+    u_id = str(interaction.user.id)
+    u = state.get_user(u_id)
+    
+    titel_str = f" `{u.premium_titel}`" if u.premium_titel else ""
+    aura_str = f"\n• Aktive Aura: **{u.premium_aura}**" if u.premium_aura else ""
+    res_str = f"\n• Residenz: **{u.premium_residenz_name}**" if u.premium_residenz_name else ""
+    vip_tag = " [💎 VIP-Mitglied]" if state.ist_premium(u_id) else ""
+    
+    benoetigt_xp = u.level * 100
+    balken = generiere_fortschrittsbalken(u.xp, benoetigt_xp)
+    
+    profil_text = (
+        f"• Name/Titel: {interaction.user.mention}{titel_str}{vip_tag}\n"
+        f"• Level: **{u.level}**\n"
+        f"• XP-Fortschritt: `{u.xp} / {benoetigt_xp} XP`\n"
+        f"📊 {balken}\n\n"
+        f"• Münzen: `🪙 {u.muenzen}`"
+        f"{aura_str}{res_str}"
+    )
+    
+    farbe = BotFarben.PREMIUM if state.ist_premium(u_id) else BotFarben.INFO
+    await interaction.response.send_message(embed=erstelle_embed("⭐ Charakter-Profil", profil_text, farbe))
+
+# ─── WEITERE UNTERHALTUNGSBEFEHLE & FALLBACKS ─────────────
+@bot.tree.command(name="money", description="Kontostand.")
+async def money(interaction: discord.Interaction):
+    u = state.get_user(str(interaction.user.id))
+    await interaction.response.send_message(embed=erstelle_embed("🪙 Kontostand", f"Du besitzt **{u.muenzen} Münzen**.", BotFarben.WIRTSCHAFT))
+
+bot.run(DISCORD_TOKEN)
