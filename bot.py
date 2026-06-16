@@ -106,3 +106,106 @@ class UserProfile:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
         return cls(**data)
+
+# --- GLOBAL BOT STATE MANAGEMENT ---
+class BotStateManager:
+    def __init__(self, data_directory: str = "bot_data"):
+        self.data_dir = data_directory
+        self.users: Dict[str, UserProfile] = {}
+        self.pets: Dict[str, PetProfile] = {}
+        self.premium_users: set = set() # Enthält IDs von Premium-Usern
+        
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+
+    def get_user(self, user_id: str, server_id: int) -> UserProfile:
+        if user_id not in self.users:
+            self.users[user_id] = UserProfile(server_id=server_id)
+        return self.users[user_id]
+
+    def get_pet(self, user_id: str) -> Optional[PetProfile]:
+        return self.pets.get(user_id)
+
+    def is_premium(self, user_id: str) -> bool:
+        return user_id in self.premium_users
+
+    # Asynchrones Laden der Serverdaten
+    async def load_server_async(self, server_id: int):
+        file_path = os.path.join(self.data_dir, f"server_{server_id}.json")
+        if not os.path.exists(file_path):
+            return
+
+        try:
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                if not content.strip():
+                    return
+                data = json.loads(content)
+                
+                # Benutzer wiederherstellen
+                for uid, udata in data.get("users", {}).items():
+                    self.users[uid] = UserProfile.from_dict(udata)
+                    
+                # Haustiere wiederherstellen
+                for uid, pdata in data.get("pets", {}).items():
+                    self.pets[uid] = PetProfile.from_dict(pdata)
+                    
+                # Premium-Status wiederherstellen
+                for uid in data.get("premium", []):
+                    self.premium_users.add(uid)
+        except Exception as e:
+            print(f"Fehler beim Laden von Server {server_id}: {e}")
+
+    # Asynchrones Speichern der Serverdaten
+    async def save_server_async(self, server_id: int):
+        file_path = os.path.join(self.data_dir, f"server_{server_id}.json")
+        
+        # Daten filtern, die zu diesem spezifischen Server gehören
+        server_users = {uid: u.to_dict() for uid, u in self.users.items() if u.server_id == server_id}
+        server_pets = {uid: p.to_dict() for uid, p in self.pets.items() if uid in server_users}
+        server_premium = [uid for uid in self.premium_users if uid in server_users]
+        
+        save_data = {
+            "users": server_users,
+            "pets": server_pets,
+            "premium": server_premium
+        }
+        
+        try:
+            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(save_data, indent=4, ensure_ascii=False))
+        except Exception as e:
+            print(f"Fehler beim Speichern von Server {server_id}: {e}")
+
+# Initialisierung des Datenmanagers
+state = BotStateManager()
+
+# --- BOT CONFIGURATION ---
+class MultiGuildBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        # Automatisches Laden im Hintergrund, wenn der Bot hochfährt
+        print("Initialisiere Systeme...")
+
+bot = MultiGuildBot()
+
+# --- HELPER FUNCTIONS FOR BEAUTIFUL EMBEDS ---
+def create_embed(title: str, description: str, color: int = Colors.DEFAULT) -> discord.Embed:
+    return discord.Embed(title=title, description=description, color=color, timestamp=datetime.now())
+
+def success_embed(text: str) -> discord.Embed:
+    return create_embed("✅ Erfolg", text, Colors.SUCCESS)
+
+def error_embed(text: str) -> discord.Embed:
+    return create_embed("❌ Fehler", text, Colors.ERROR)
+
+def info_embed(text: str) -> discord.Embed:
+    return create_embed("ℹ️ Information", text, Colors.INFO)
+
+def format_number(number: int) -> str:
+    return f"{number:,}".replace(",", ".")
