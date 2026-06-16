@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 # 1. KONFIGURATION & EINSTELLUNGEN
 # ==========================================
 
-# Ersetze diese ID mit deiner echten Discord-User-ID (Nightleon1)
-OWNER_ID = 123456789012345678 
+# Ersetze diese ID mit deiner echten Discord-User-ID (nightleon1)
+OWNER_ID = 1405193599984861255
 
 # Hier stellen wir die Rechte (Intents) ein, die der Bot auf dem Server braucht
 intents = discord.Intents.default()
