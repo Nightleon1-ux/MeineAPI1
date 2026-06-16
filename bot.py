@@ -1208,6 +1208,13 @@ async def on_ready():
 
 
 # --- BOT AUSFÜHREN ---
+# --- BOT AUSFÜHREN ---
 if __name__ == "__main__":
-    # Ersetze 'DEIN_BOT_TOKEN_HIER' durch das echte Token aus dem Discord Developer Portal
-    bot.run("DEIN_BOT_TOKEN_HIER")
+    # Holt sich das Token sicher aus den Railway-Variablen
+    import os
+    token = os.getenv("DISCORD_TOKEN")
+    
+    if not token or token == "DEIN_BOT_TOKEN_HIER":
+        print("❌ FEHLER: Kein gültiges Discord-Token gefunden! Füge es in den Railway-Variablen als DISCORD_TOKEN hinzu.")
+    else:
+        bot.run(token)
