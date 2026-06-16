@@ -1,3 +1,9 @@
+import os
+try:
+    import aiofiles
+except ModuleNotFoundError:
+    os.system("pip install aiofiles")
+    import aiofiles
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -9,8 +15,7 @@ import aiofiles
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Dict, Any, Optional
-discord.py
-aiofiles
+
 # --- BRANDING & DESIGN (FARBEN) ---
 class Colors:
     DEFAULT = 0x3498db      # Blau (Standard)
